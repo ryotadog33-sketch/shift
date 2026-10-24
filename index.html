@@ -138,6 +138,25 @@ button.cell{cursor:pointer}
 .pill{display:inline-block;border-radius:999px;padding:1px 9px;font-size:12px;font-weight:700}
 .pill.ok{background:var(--ok-soft);color:var(--ok)} .pill.short{background:var(--ng-soft);color:var(--ng)} .pill.half{background:var(--part-soft);color:var(--part)}
 
+/* 時間軸：開店〜閉店を30分ごとのマスで並べる */
+.tl{display:grid;grid-template-columns:repeat(var(--n,24),minmax(0,1fr));gap:1px;width:100%}
+.tl span{height:10px;background:var(--line);border-radius:2px}
+.tl span.av{background:var(--ok-soft)} .tl span.pv{background:var(--part-soft)}
+.tl span.as{background:var(--accent)} .tl span.as.warn{background:var(--ng)}
+.tl-head span,.tl-cov span{background:none;height:auto;font-size:10px;line-height:1.5;color:var(--muted);font-variant-numeric:tabular-nums}
+.tl-head span{overflow:visible;white-space:nowrap}
+.tl-cov span{text-align:center;border-radius:3px}
+.tl-cov span.ok{background:var(--ok-soft);color:var(--ok)} .tl-cov span.ng{background:var(--ng-soft);color:var(--ng);font-weight:700}
+.slist{display:flex;flex-direction:column;gap:6px}
+.srow{display:flex;flex-direction:column;gap:4px;text-align:left;border:1.5px solid var(--line);background:var(--surface);border-radius:10px;padding:8px 10px;width:100%}
+.srow.on{border-color:var(--accent)}
+.srow.dim{opacity:.6}
+.srow-top{display:flex;justify-content:space-between;gap:8px;min-width:0}
+.srow .nm{font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.srow .tm{font-weight:700;color:var(--accent);white-space:nowrap}
+.srow .meta{font-size:11px;color:var(--muted)}
+.tilde{padding-top:20px;color:var(--muted)}
+
 .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px}
 table.mx{border-collapse:separate;border-spacing:0;font-size:12px;font-variant-numeric:tabular-nums}
 .mx th,.mx td{border-bottom:1px solid var(--line);border-right:1px solid var(--line);padding:4px 0;text-align:center;min-width:28px;background:var(--surface)}
@@ -189,7 +208,8 @@ const LS = {
 };
 const WD = '日月火水木金土';
 const SYM = {o:'○', p:'△', x:'×'};
-const DEFAULT_SETTINGS = { store:'', deadline:'', slots:[{id:'a', name:'早番', time:'', need:1}, {id:'b', name:'遅番', time:'', need:1}] };
+// 時刻は 0:00 からの分で持つ（540 = 9:00）
+const DEFAULT_SETTINGS = { store:'', deadline:'', open:540, close:1260, bands:[{s:540, e:1260, n:2}], presets:['9:00-15:00', '15:00-21:00', '9:00-21:00'] };
 const API_URL = String(window.SHIFT_API_URL || '').trim();
 
 const ym = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
@@ -203,10 +223,11 @@ const uid = p => p + Date.now().toString(36) + Math.random().toString(36).slice(
 const S = {
   mode:'loading', err:'', staff:{}, avail:{}, shifts:{}, settings:null,
   month:nextMonth(), tab:LS.get('sb.tab', 'req'), me:LS.get('sb.me', ''), key:LS.get('sb.key', ''),
-  brush:'o', partTime:LS.get('sb.partTime', ''), draft:{days:{}, remark:''}, draftKey:'', dirty:false,
+  brush:'o', partA:LS.get('sb.partA', 540), partB:LS.get('sb.partB', 900), lastAs:null, edit:null, draft:{days:{}, remark:''}, draftKey:'', dirty:false,
   isOwner:false, selDay:null, showNg:false, confirmDel:null, needRender:false, sending:false
 };
-const settings = () => S.settings || DEFAULT_SETTINGS;
+// 古い形式（早番・遅番）の設定にも、足りない項目は初期値を補う
+const settings = () => ({...DEFAULT_SETTINGS, ...(S.settings || {})});
 const staffList = () => Object.entries(S.staff).filter(([, v]) => v && v.active !== false)
   .map(([id, v]) => ({id, ...v})).sort((a, b) => (a.order||0) - (b.order||0));
 const availDoc = (m, id) => S.avail[m + '_' + id];
@@ -307,18 +328,52 @@ function markDirty(){
 }
 function clearDraft(){ const all = LS.get('sb.drafts', {}); delete all[draftStoreKey()]; LS.set('sb.drafts', all); }
 
-/* ---------- シフト ---------- */
-function getShift(m){ return S.shifts[m] || { month:m, days:{}, need:{}, published:false }; }
+/* ---------- 時間（30分単位） ---------- */
+const STEP = 30;
+const fmt = m => `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
+const fmtR = (s, e) => `${fmt(s)}-${fmt(e)}`;
+const fmtH = h => (Number.isInteger(h) ? h : h.toFixed(1)) + '時間';
+function parseRange(t){
+  const m = String(t || '').replace(/：/g, ':').match(/(\d{1,2})(?::(\d{2}))?\s*時?\s*[-~〜～ー－]\s*(\d{1,2})(?::(\d{2}))?/);
+  if(!m) return null;
+  const s = m[1] * 60 + Number(m[2] || 0), e = m[3] * 60 + Number(m[4] || 0);
+  return e > s ? {s, e} : null;
+}
+function hoursOf(){ const st = settings(), o = Number(st.open ?? 540), c = Number(st.close ?? 1260); return c > o ? {o, c} : {o:540, c:1260}; }
+function ticks(){ const {o, c} = hoursOf(), a = []; for(let t = o; t < c; t += STEP) a.push(t); return a; }
+function timeOpts(sel, from, to){ let h = ''; for(let t = from; t <= to; t += STEP) h += `<option value="${t}" ${t === sel ? 'selected' : ''}>${fmt(t)}</option>`; return h; }
+const presets = () => (settings().presets || []).map(parseRange).filter(Boolean);
+// 希望から、その日に入れる時間帯を出す（○は開店〜閉店、時間の読めない△は null）
+function availRange(e){
+  if(!e || e.s === 'x') return null;
+  const {o, c} = hoursOf();
+  if(e.s === 'o') return {s:o, e:c};
+  if(e.a != null && e.b > e.a) return {s:e.a, e:e.b};
+  return parseRange(e.t);
+}
+
+/* ---------- シフト：days[日][従業員ID] = {s:開始, e:終了} ---------- */
+function getShift(m){ return S.shifts[m] || { month:m, days:{}, published:false }; }
 function editShift(m, fn){
   const s = JSON.parse(JSON.stringify(getShift(m)));
-  s.days = s.days || {}; s.need = s.need || {};
+  s.days = s.days || {};
   fn(s); s.updatedAt = Date.now();
   S.shifts[m] = s; queueWrite('shifts/' + m, s); render();
 }
-const needFor = (sh, d, slot) => sh.need?.[d]?.[slot.id] ?? slot.need ?? 0;
-function dayNeed(sh, d){ return settings().slots.reduce((a, sl) => a + Number(needFor(sh, d, sl) || 0), 0); }
-function dayAssigned(sh, d){ const set = new Set(); Object.values(sh.days?.[d] || {}).forEach(a => a.forEach(id => S.staff[id]?.active !== false && set.add(id))); return set; }
-function assignedCount(sh, id){ let c = 0; Object.values(sh.days || {}).forEach(day => { if(Object.values(day).some(a => a.includes(id))) c++; }); return c; }
+const needAt = t => (settings().bands || []).reduce((a, b) => t >= b.s && t < b.e ? Math.max(a, Number(b.n) || 0) : a, 0);
+function dayNeed(){ return ticks().reduce((a, t) => Math.max(a, needAt(t)), 0); }
+const dayEntries = (sh, d) => Object.entries(sh.days?.[d] || {}).filter(([id, v]) => S.staff[id] && S.staff[id].active !== false && v && v.e > v.s);
+function coverage(sh, d){ const es = dayEntries(sh, d); return ticks().map(t => ({t, n:es.filter(([, v]) => v.s <= t && t < v.e).length, need:needAt(t)})); }
+function dayStatus(sh, d){
+  const cov = coverage(sh, d);
+  if(!dayEntries(sh, d).length) return cov.some(c => c.need) ? 'short' : '';
+  return cov.every(c => c.n >= c.need) ? 'full' : 'half';
+}
+function staffTotals(sh, id){
+  let days = 0, min = 0;
+  Object.values(sh.days || {}).forEach(day => { const v = day[id]; if(v && v.e > v.s){ days++; min += v.e - v.s; } });
+  return {days, hours:min / 60};
+}
 
 function dayStats(m, d){
   const r = {o:[], p:[], x:[], n:[]};
@@ -390,7 +445,10 @@ function viewReq(){
   return head + `
   <section class="card">
     <div class="brushes">${brushes}</div>
-    ${S.brush === 'p' ? `<div class="field"><label for="partTime">△の時間（この時間で入力されます）</label><input type="text" id="partTime" value="${esc(S.partTime)}" placeholder="例）10:00-15:00、17時以降"></div>` : ''}
+    ${S.brush === 'p' ? (() => { const {o, c} = hoursOf(); return `<div class="row" style="flex-wrap:nowrap">
+      <div class="field" style="flex:1"><label for="partA">△ 何時から</label><select id="partA">${timeOpts(S.partA, o, c - STEP)}</select></div>
+      <span class="tilde">〜</span>
+      <div class="field" style="flex:1"><label for="partB">何時まで</label><select id="partB">${timeOpts(S.partB, o + STEP, c)}</select></div></div>`; })() : ''}
     <p class="muted">記号を選んでから日付をタップ。同じ記号でもう一度タップすると消えます。</p>
     ${cal}
     <div class="row between">
@@ -450,46 +508,46 @@ function viewSum(){
 }
 
 function viewShift(){
-  const m = S.month, staff = staffList(), sh = getShift(m), st = settings();
+  const m = S.month, staff = staffList(), sh = getShift(m);
   if(!staff.length) return emptyStaff();
   const {n} = monthInfo(m);
   if(!S.selDay || Number(S.selDay) > n) S.selDay = '01';
-  const d = S.selDay, di = Number(d);
+  const d = S.selDay, di = Number(d), tk = ticks(), N = tk.length;
   const cal = calGrid(m, (i, dd, wcls) => {
-    const a = dayAssigned(sh, dd).size, need = dayNeed(sh, dd);
-    const cls = need ? (a >= need ? 'full' : a > 0 ? 'half' : 'short') : (a ? 'full' : '');
-    return `<button class="cell ${wcls} ${cls} ${dd === d ? 'sel' : ''}" data-act="selday" data-day="${dd}" aria-label="${dayLabel(m, i)} ${a}/${need}人">
-      <span class="dn">${i}</span><span class="big num" style="font-size:16px">${a}<span class="tiny">/${need}</span></span></button>`;
+    const c = dayEntries(sh, dd).length;
+    return `<button class="cell ${wcls} ${dayStatus(sh, dd)} ${dd === d ? 'sel' : ''}" data-act="selday" data-day="${dd}" aria-label="${dayLabel(m, i)} ${c}人">
+      <span class="dn">${i}</span><span class="big num" style="font-size:16px">${c}<span class="tiny">人</span></span></button>`;
   });
+  const cov = coverage(sh, d);
+  const head = `<div class="tl tl-head" style="--n:${N}">${tk.map(t => `<span>${t % 60 === 0 ? t / 60 : ''}</span>`).join('')}</div>`;
+  const covRow = `<div class="tl tl-cov" style="--n:${N}">${cov.map(c => `<span class="${c.need ? (c.n >= c.need ? 'ok' : 'ng') : ''}">${c.n}</span>`).join('')}</div>`;
+  // 足りない時間帯を「9:00-11:00 あと1人」のようにまとめる
+  const gaps = [];
+  cov.forEach(c => { const lack = c.need - c.n; if(lack <= 0) return; const g = gaps[gaps.length - 1]; if(g && g.e === c.t && g.lack === lack) g.e = c.t + STEP; else gaps.push({s:c.t, e:c.t + STEP, lack}); });
   const r = dayStats(m, d);
-  const order = [...r.o.map(x => ({...x, s:'o'})), ...r.p.map(x => ({...x, s:'p'})), ...r.n.map(x => ({...x, s:''})), ...(S.showNg ? r.x.map(x => ({...x, s:'x'})) : [])];
+  const order = [...r.o.map(x => ({...x, s:'o'})), ...r.p.map(x => ({...x, s:'p'})), ...r.n.map(x => ({...x, s:''})), ...r.x.map(x => ({...x, s:'x'}))];
   const today = sh.days?.[d] || {};
-  const slots = st.slots.map(sl => {
-    const ids = (today[sl.id] || []).filter(id => S.staff[id]?.active !== false);
-    const need = Number(needFor(sh, d, sl) || 0);
-    const pill = need ? `<span class="pill ${ids.length >= need ? 'ok' : ids.length ? 'half' : 'short'} num">${ids.length}/${need}人</span>` : `<span class="pill ok num">${ids.length}人</span>`;
-    const cands = order.map(({st:s, s:code, t}) => {
-      const on = ids.includes(s.id);
-      const other = !on && st.slots.some(o => o.id !== sl.id && (today[o.id] || []).includes(s.id));
-      const meta = [code ? SYM[code] + (code === 'p' && t ? ' ' + t : '') : '未回答', `今月${assignedCount(sh, s.id)}日`, other ? '他の枠に入っています' : ''].filter(Boolean).join('・');
-      return `<button data-act="assign" data-slot="${esc(sl.id)}" data-staff="${esc(s.id)}" aria-pressed="${on}" class="${code === 'x' || other ? 'dim' : ''}">
-        <span class="nm"><span class="sym s-${code}">${code ? SYM[code] : '—'}</span> ${esc(s.name)}</span><span class="meta">${esc(meta)}</span></button>`;
+  const rows = order.filter(({st, s}) => s !== 'x' || S.showNg || today[st.id]?.e).map(({st:s, s:code}) => {
+    const e = availDoc(m, s.id)?.days?.[d], ar = availRange(e), v = today[s.id], as = v && v.e > v.s ? v : null;
+    const cells = tk.map(t => {
+      const inA = as && as.s <= t && t < as.e, inV = ar && ar.s <= t && t < ar.e;
+      return `<span class="${inA ? (inV || !code ? 'as' : 'as warn') : inV ? (code === 'p' ? 'pv' : 'av') : ''}"></span>`;
     }).join('');
-    return `<div class="slot">
-      <div class="row between"><div><b>${esc(sl.name)}</b> ${sl.time ? `<span class="muted">${esc(sl.time)}</span>` : ''}</div>${pill}</div>
-      <div class="row"><span class="muted">必要人数</span><span class="stepper"><button data-act="need" data-slot="${esc(sl.id)}" data-d="-1" aria-label="減らす">−</button><span class="num">${need}人</span><button data-act="need" data-slot="${esc(sl.id)}" data-d="1" aria-label="増やす">＋</button></span></div>
-      <div class="cand">${cands || '<p class="muted">候補がいません</p>'}</div>
-    </div>`;
+    const want = code === 'p' ? `△ ${e?.t || '時間指定'}` : code === 'o' ? '○ 出勤できる' : code === 'x' ? '× 出勤できない' : '未回答';
+    return `<button class="srow ${as ? 'on' : ''} ${code === 'x' && !as ? 'dim' : ''}" data-act="editas" data-staff="${esc(s.id)}">
+      <span class="srow-top"><span class="nm"><span class="sym s-${code}">${code ? SYM[code] : '—'}</span> ${esc(s.name)}</span><span class="tm num">${as ? fmtR(as.s, as.e) : '未割当'}</span></span>
+      <span class="tl" style="--n:${N}">${cells}</span>
+      <span class="meta">${esc(want)}・今月${staffTotals(sh, s.id).days}日</span></button>`;
   }).join('');
   const tally = staff.map(s => {
-    const doc = availDoc(m, s.id);
+    const doc = availDoc(m, s.id), t = staffTotals(sh, s.id);
     const can = doc ? Object.values(doc.days || {}).filter(e => e.s !== 'x').length : null;
-    return `<div class="li"><div class="grow">${esc(s.name)}</div><span class="muted num">${can == null ? '未提出' : `入れる日 ${can}日`}</span><b class="num" style="min-width:3.5em;text-align:right">${assignedCount(sh, s.id)}日</b></div>`;
+    return `<div class="li"><div class="grow">${esc(s.name)}</div><span class="muted num">${can == null ? '未提出' : `入れる日 ${can}日`}</span><b class="num" style="min-width:6.5em;text-align:right">${t.days}日 ${fmtH(t.hours)}</b></div>`;
   }).join('');
   return `
   <section class="card">
     <div class="row between"><h2>シフト作成</h2>${sh.published ? '<span class="pill ok">公開中</span>' : '<span class="pill half">下書き</span>'}</div>
-    <div class="legend"><span><i style="background:var(--ok-soft)"></i>足りている</span><span><i style="background:var(--part-soft)"></i>一部</span><span><i style="background:var(--ng-soft)"></i>未割り当て</span></div>
+    <div class="legend"><span><i style="background:var(--ok-soft)"></i>必要人数を満たす</span><span><i style="background:var(--part-soft)"></i>足りない時間あり</span><span><i style="background:var(--ng-soft)"></i>未割り当て</span></div>
     ${cal}
   </section>
   <section class="card">
@@ -498,12 +556,14 @@ function viewShift(){
       <h2>${dayLabel(m, di)}</h2>
       <button class="icon-btn" data-act="dstep" data-d="1" ${di >= n ? 'disabled' : ''} aria-label="次の日">›</button>
     </div>
-    <p class="muted num">勤務可能 <span class="sym s-o">○</span>${r.o.length}人 <span class="sym s-p">△</span>${r.p.length}人　<span class="sym s-x">×</span>${r.x.length}人　未回答${r.n.length}人</p>
-    <label class="row muted" style="font-size:13px"><input type="checkbox" id="showNg" ${S.showNg ? 'checked' : ''}> ×の人も候補に出す</label>
-    ${slots}
+    <div class="field"><h3>時間ごとの人数</h3>${head}${covRow}</div>
+    ${gaps.length ? `<p class="muted" style="color:var(--ng)">足りない時間：${gaps.map(g => `${fmtR(g.s, g.e)} あと${g.lack}人`).join('、')}</p>` : (dayEntries(sh, d).length ? '<p class="muted" style="color:var(--ok)">必要人数を満たしています</p>' : '')}
+    <p class="muted">名前をタップして、入る時間を決めます。<span style="color:var(--ok)">緑</span>は入れる時間、<span style="color:var(--part)">黄</span>は△の時間、<span style="color:var(--accent)">青</span>が決めたシフトです。</p>
+    <label class="row muted" style="font-size:13px"><input type="checkbox" id="showNg" ${S.showNg ? 'checked' : ''}> ×の人も表示する</label>
+    <div class="slist">${rows || '<p class="muted">表示できる人がいません</p>'}</div>
   </section>
   <section class="card">
-    <h2>今月の勤務日数</h2>
+    <h2>今月の勤務日数と時間</h2>
     <div class="list">${tally}</div>
   </section>
   <section class="card">
@@ -516,25 +576,44 @@ function viewShift(){
   </section>`;
 }
 
+function editAssignSheet(id){
+  const m = S.month, d = S.selDay, sh = getShift(m), cur = sh.days?.[d]?.[id], has = cur && cur.e > cur.s;
+  const e = availDoc(m, id)?.days?.[d], ar = availRange(e), {o, c} = hoursOf();
+  const def = has ? cur : (e?.s === 'p' && ar) || S.lastAs || {s:o, e:c};
+  S.edit = {id, d};
+  const chips = [...(e?.s === 'p' && ar ? [{label:'△の希望どおり ' + fmtR(ar.s, ar.e), ...ar}] : []), ...presets()]
+    .map(p => `<button class="chip" data-act="preset" data-s="${p.s}" data-e="${p.e}">${esc(p.label || fmtR(p.s, p.e))}</button>`).join('');
+  openSheet(`<h2>${esc(S.staff[id].name)}　${dayLabel(m, Number(d))}</h2>
+    <p class="muted">希望：${e ? (e.s === 'p' ? '△ ' + esc(e.t || '時間指定') : e.s === 'o' ? '○ 出勤できる' : '× 出勤できない') : '未回答'}</p>
+    ${chips ? `<div class="chips">${chips}</div>` : ''}
+    <div class="row" style="flex-wrap:nowrap">
+      <div class="field" style="flex:1"><label for="asS">開始</label><select id="asS">${timeOpts(def.s, o, c - STEP)}</select></div>
+      <span class="tilde">〜</span>
+      <div class="field" style="flex:1"><label for="asE">終了</label><select id="asE">${timeOpts(def.e, o + STEP, c)}</select></div>
+    </div>
+    <button class="btn primary block" data-act="saveas">この時間で入れる</button>
+    ${has ? '<button class="btn danger block" data-act="unassign">この日のシフトから外す</button>' : ''}`);
+}
+
 function viewMy(){
-  const m = S.month, sh = getShift(m), st = settings();
+  const m = S.month, sh = getShift(m);
   if(!sh.published) return `<section class="card"><div class="empty"><h2>${monthInfo(m).mo}月のシフトはまだ公開されていません</h2><p>店長が公開するとここに表示されます。</p></div></section>`;
   const {n} = monthInfo(m);
   const mine = [];
   let rows = '';
   for(let i = 1; i <= n; i++){
-    const d = dk(i), day = sh.days?.[d] || {};
-    const parts = st.slots.map(sl => {
-      const ids = (day[sl.id] || []).filter(id => S.staff[id]);
-      if(S.me && ids.includes(S.me)) mine.push(`${i}日 ${sl.name}`);
-      return ids.length ? `<div><span class="muted">${esc(sl.name)}</span> ${ids.map(id => id === S.me ? `<span class="me-hl">${esc(S.staff[id].name)}</span>` : esc(S.staff[id].name)).join('・')}</div>` : '';
-    }).join('');
-    if(parts){ const w = dow(m, i); rows += `<div class="li"><b class="num" style="min-width:4.2em;color:${w === 0 ? 'var(--sun)' : w === 6 ? 'var(--sat)' : 'inherit'}">${i}日(${WD[w]})</b><div class="grow">${parts}</div></div>`; }
+    const d = dk(i), es = dayEntries(sh, d).sort((a, b) => a[1].s - b[1].s);
+    if(!es.length) continue;
+    const v = S.me && sh.days[d][S.me];
+    if(v && v.e > v.s) mine.push(`${i}日(${WD[dow(m, i)]}) ${fmtR(v.s, v.e)}`);
+    const w = dow(m, i);
+    rows += `<div class="li"><b class="num" style="min-width:4.2em;align-self:flex-start;color:${w === 0 ? 'var(--sun)' : w === 6 ? 'var(--sat)' : 'inherit'}">${i}日(${WD[w]})</b><div class="grow">${es.map(([id, v]) => `<div class="num">${id === S.me ? `<span class="me-hl">${esc(S.staff[id].name)}</span>` : esc(S.staff[id].name)} <span class="muted">${fmtR(v.s, v.e)}</span></div>`).join('')}</div></div>`;
   }
+  const t = S.me ? staffTotals(sh, S.me) : null;
   return `
   <section class="card">
     <h2>あなたの勤務日</h2>
-    ${S.me ? (mine.length ? `<div class="chips">${mine.map(x => `<span class="chip on">${esc(x)}</span>`).join('')}</div><p class="muted num">合計 ${new Set(mine.map(x => x.split(' ')[0])).size}日</p>` : '<p class="muted">今月の割り当てはありません。</p>') : '<p class="muted">「希望提出」で名前を選ぶと、自分の勤務日が表示されます。</p>'}
+    ${S.me ? (mine.length ? `<div class="chips">${mine.map(x => `<span class="chip on num">${esc(x)}</span>`).join('')}</div><p class="muted num">合計 ${t.days}日・${fmtH(t.hours)}</p>` : '<p class="muted">今月の割り当てはありません。</p>') : '<p class="muted">「希望提出」で名前を選ぶと、自分の勤務日が表示されます。</p>'}
   </section>
   <section class="card"><h2>${monthInfo(m).mo}月のシフト</h2><div class="list">${rows || '<p class="muted">まだ割り当てがありません。</p>'}</div></section>`;
 }
@@ -560,17 +639,25 @@ function viewSet(){
     <div class="list">${staff.map(s => `<div class="li"><div class="grow">${esc(s.name)}</div><button class="btn small danger" data-act="delstaff" data-id="${esc(s.id)}">${S.confirmDel === s.id ? 'もう一度押すと削除' : '削除'}</button></div>`).join('') || '<p class="muted">まだ登録されていません。</p>'}</div>
   </section>
   <section class="card">
-    <h2>シフト枠</h2>
-    <p class="muted">早番・遅番など1日の勤務の区切りです。必要人数はここが初期値で、日ごとにシフト作成画面で変えられます。</p>
-    ${st.slots.map((sl, i) => `<div class="slot">
-      <div class="row" style="flex-wrap:nowrap">
-        <div class="field" style="flex:1"><label for="sn${i}">名前</label><input type="text" id="sn${i}" data-slotf="name" data-i="${i}" value="${esc(sl.name)}"></div>
-        <div class="field" style="flex:1.3"><label for="stm${i}">時間</label><input type="text" id="stm${i}" data-slotf="time" data-i="${i}" value="${esc(sl.time)}" placeholder="9:00-15:00"></div>
-        <div class="field" style="width:4.2em"><label for="snd${i}">人数</label><input type="text" inputmode="numeric" id="snd${i}" data-slotf="need" data-i="${i}" value="${esc(sl.need)}"></div>
-      </div>
-      ${st.slots.length > 1 ? `<div><button class="btn small danger" data-act="delslot" data-i="${i}">${S.confirmDel === 'slot' + i ? 'もう一度押すと削除' : 'この枠を削除'}</button></div>` : ''}
+    <h2>営業時間と必要人数</h2>
+    <div class="row" style="flex-wrap:nowrap">
+      <div class="field" style="flex:1"><label for="setOpen">シフトの始まり</label><select id="setOpen" data-hours="open">${timeOpts(hoursOf().o, 300, 1380)}</select></div>
+      <span class="tilde">〜</span>
+      <div class="field" style="flex:1"><label for="setClose">終わり</label><select id="setClose" data-hours="close">${timeOpts(hoursOf().c, 360, 1440)}</select></div>
+    </div>
+    <p class="muted">時間帯ごとに、最低何人いてほしいかを決めます。シフト作成で足りない時間が赤く表示されます（例：11:00-14:00 は3人）。</p>
+    ${(st.bands || []).map((b, i) => `<div class="row" style="flex-wrap:nowrap;align-items:flex-end">
+      <div class="field" style="flex:1"><label for="bs${i}">から</label><select id="bs${i}" data-band="s" data-i="${i}">${timeOpts(b.s, hoursOf().o, hoursOf().c - STEP)}</select></div>
+      <div class="field" style="flex:1"><label for="be${i}">まで</label><select id="be${i}" data-band="e" data-i="${i}">${timeOpts(b.e, hoursOf().o + STEP, hoursOf().c)}</select></div>
+      <div class="field" style="width:4.2em"><label for="bn${i}">人数</label><input type="text" inputmode="numeric" id="bn${i}" data-band="n" data-i="${i}" value="${esc(b.n)}"></div>
+      <button class="btn small danger" data-act="delband" data-i="${i}" aria-label="この時間帯を削除">${S.confirmDel === 'band' + i ? '削除?' : '×'}</button>
     </div>`).join('')}
-    <div><button class="btn" data-act="addslot">＋ 枠を追加</button></div>
+    <div><button class="btn" data-act="addband">＋ 時間帯を追加</button></div>
+  </section>
+  <section class="card">
+    <h2>よく使う時間</h2>
+    <p class="muted">シフト作成でワンタップで入れられる時間です。「、」で区切って入力します。</p>
+    <input type="text" id="setPresets" data-presets="1" value="${esc((st.presets || []).join('、'))}" placeholder="例）9:00-15:00、15:00-21:00、9:00-21:00">
   </section>
   <section class="card">
     <h2>店長として使う端末</h2>
@@ -610,13 +697,14 @@ async function submit(){
 }
 
 function exportCsv(){
-  const m = S.month, sh = getShift(m), st = settings(), {n} = monthInfo(m);
+  const m = S.month, sh = getShift(m), staff = staffList(), {n} = monthInfo(m);
   const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
-  const lines = [['日付', '曜日', ...st.slots.map(s => s.name + (s.time ? `(${s.time})` : ''))].map(q).join(',')];
+  const lines = [['日付', '曜日', ...staff.map(s => s.name)].map(q).join(',')];
   for(let i = 1; i <= n; i++){
     const day = sh.days?.[dk(i)] || {};
-    lines.push([`${m}-${dk(i)}`, WD[dow(m, i)], ...st.slots.map(sl => (day[sl.id] || []).map(id => S.staff[id]?.name).filter(Boolean).join('・'))].map(q).join(','));
+    lines.push([`${m}-${dk(i)}`, WD[dow(m, i)], ...staff.map(s => { const v = day[s.id]; return v && v.e > v.s ? fmtR(v.s, v.e) : ''; })].map(q).join(','));
   }
+  lines.push(['合計', '', ...staff.map(s => { const t = staffTotals(sh, s.id); return `${t.days}日 ${fmtH(t.hours)}`; })].map(q).join(','));
   const url = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], {type:'text/csv'}));
   const a = document.createElement('a'); a.href = url; a.download = `shift-${m}.csv`;
   document.body.appendChild(a); a.click(); a.remove();
@@ -645,8 +733,10 @@ document.addEventListener('click', async ev => {
   else if(a === 'brush'){ S.brush = b.dataset.b; render(); }
   else if(a === 'paint'){
     const d = b.dataset.day, cur = S.draft.days[d];
-    if(S.brush === 'c' || (cur && cur.s === S.brush && (S.brush !== 'p' || (cur.t || '') === S.partTime.trim()))) delete S.draft.days[d];
-    else S.draft.days[d] = S.brush === 'p' && S.partTime.trim() ? {s:'p', t:S.partTime.trim().slice(0, 40)} : {s:S.brush};
+    if(S.brush === 'p' && S.partB <= S.partA){ toast('△の終わりの時間を、始まりより後にしてください'); return; }
+    const t = fmtR(S.partA, S.partB);
+    if(S.brush === 'c' || (cur && cur.s === S.brush && (S.brush !== 'p' || cur.t === t))) delete S.draft.days[d];
+    else S.draft.days[d] = S.brush === 'p' ? {s:'p', t, a:S.partA, b:S.partB} : {s:S.brush};
     markDirty(); render();
   }
   else if(a === 'fill'){ const {n} = monthInfo(S.month); for(let i = 1; i <= n; i++) if(!S.draft.days[dk(i)]) S.draft.days[dk(i)] = {s:'o'}; markDirty(); render(); }
@@ -659,13 +749,20 @@ document.addEventListener('click', async ev => {
   else if(a === 'goshift'){ S.selDay = b.dataset.day; S.tab = 'shift'; LS.set('sb.tab', S.tab); closeSheet(); render(); window.scrollTo(0, 0); }
   else if(a === 'selday'){ S.selDay = b.dataset.day; render(); }
   else if(a === 'dstep'){ const {n} = monthInfo(S.month); S.selDay = dk(Math.min(n, Math.max(1, Number(S.selDay) + Number(b.dataset.d)))); render(); }
-  else if(a === 'need'){
-    const sl = settings().slots.find(s => s.id === b.dataset.slot); const d = S.selDay;
-    editShift(S.month, s => { const cur = Number(needFor(s, d, sl) || 0); (s.need[d] = s.need[d] || {})[sl.id] = Math.max(0, cur + Number(b.dataset.d)); });
+  else if(a === 'editas') editAssignSheet(b.dataset.staff);
+  else if(a === 'preset'){ $('#asS').value = b.dataset.s; $('#asE').value = b.dataset.e; }
+  else if(a === 'saveas'){
+    const s = Number($('#asS').value), e = Number($('#asE').value), {id, d} = S.edit || {};
+    if(!id) return;
+    if(e <= s){ toast('終わりの時間を、始まりより後にしてください'); return; }
+    S.lastAs = {s, e}; closeSheet();
+    editShift(S.month, sh => { (sh.days[d] = sh.days[d] || {})[id] = {s, e}; });
   }
-  else if(a === 'assign'){
-    const {slot, staff} = b.dataset, d = S.selDay;
-    editShift(S.month, s => { const day = s.days[d] = s.days[d] || {}; const arr = day[slot] = day[slot] || []; const i = arr.indexOf(staff); i >= 0 ? arr.splice(i, 1) : arr.push(staff); });
+  else if(a === 'unassign'){
+    const {id, d} = S.edit || {};
+    if(!id) return;
+    closeSheet();
+    editShift(S.month, sh => { if(sh.days[d]){ delete sh.days[d][id]; if(!Object.keys(sh.days[d]).length) delete sh.days[d]; } });
   }
   else if(a === 'publish'){ const p = !getShift(S.month).published; editShift(S.month, s => { s.published = p; }); toast(p ? '従業員に公開しました' : '公開をやめました'); }
   else if(a === 'csv') exportCsv();
@@ -688,11 +785,11 @@ document.addEventListener('click', async ev => {
     if(S.me === id){ S.me = ''; LS.set('sb.me', ''); }
     render();
   }
-  else if(a === 'addslot'){ const st = structuredClone(settings()); st.slots.push({id:uid('k'), name:'新しい枠', time:'', need:1}); saveSettings(st); }
-  else if(a === 'delslot'){
+  else if(a === 'addband'){ const st = structuredClone(settings()), {o, c} = hoursOf(); (st.bands = st.bands || []).push({s:o, e:c, n:1}); saveSettings(st); }
+  else if(a === 'delband'){
     const i = Number(b.dataset.i);
-    if(!confirmTwice('slot' + i)) return;
-    const st = structuredClone(settings()); st.slots.splice(i, 1); saveSettings(st);
+    if(!confirmTwice('band' + i)) return;
+    const st = structuredClone(settings()); st.bands.splice(i, 1); saveSettings(st);
   }
   else if(a === 'logout'){
     if(!confirmTwice('logout')) return;
@@ -706,16 +803,26 @@ document.addEventListener('change', ev => {
   if(t.id === 'meSel'){ S.me = t.value; LS.set('sb.me', S.me); S.draftKey = ''; S.dirty = false; t.blur(); render(); if(!S.isOwner) refresh(); }
   else if(t.id === 'showNg'){ S.showNg = t.checked; t.blur(); render(); }
   else if(t.dataset.set){ const st = structuredClone(settings()); st[t.dataset.set] = t.value.trim().slice(0, 60); S.settings = st; queueWrite('settings/main', st, 300); }
-  else if(t.dataset.slotf){
-    const st = structuredClone(settings()), sl = st.slots[Number(t.dataset.i)]; if(!sl) return;
-    sl[t.dataset.slotf] = t.dataset.slotf === 'need' ? Math.max(0, parseInt(t.value, 10) || 0) : t.value.trim().slice(0, 30);
-    S.settings = st; queueWrite('settings/main', st, 300);
+  else if(t.dataset.hours){
+    const st = structuredClone(settings()); st[t.dataset.hours] = Number(t.value);
+    if(st.close <= st.open){ toast('終わりの時間を、始まりより後にしてください'); render(); return; }
+    t.blur(); saveSettings(st);
   }
+  else if(t.dataset.band){
+    const st = structuredClone(settings()), bd = st.bands?.[Number(t.dataset.i)]; if(!bd) return;
+    bd[t.dataset.band] = t.dataset.band === 'n' ? Math.min(99, Math.max(0, parseInt(t.value, 10) || 0)) : Number(t.value);
+    t.blur(); saveSettings(st);
+  }
+  else if(t.dataset.presets){
+    const st = structuredClone(settings());
+    st.presets = t.value.split(/[、,\s]+/).map(x => x.trim()).filter(x => parseRange(x)).slice(0, 20);
+    saveSettings(st);
+  }
+  else if(t.id === 'partA' || t.id === 'partB'){ S[t.id] = Number(t.value); LS.set('sb.' + t.id, S[t.id]); t.blur(); render(); }
 });
 document.addEventListener('input', ev => {
   const t = ev.target;
-  if(t.id === 'partTime'){ S.partTime = t.value; LS.set('sb.partTime', S.partTime); }
-  else if(t.id === 'remark'){ S.draft.remark = t.value.slice(0, 500); markDirty(); }
+  if(t.id === 'remark'){ S.draft.remark = t.value.slice(0, 500); markDirty(); }
 });
 document.addEventListener('focusout', () => setTimeout(() => { if(S.needRender) render(); }, 0));
 document.addEventListener('keydown', ev => {
