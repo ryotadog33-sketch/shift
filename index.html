@@ -88,11 +88,11 @@ input[type=text],select,textarea{border:1px solid var(--line-strong);background:
 textarea{resize:vertical;min-height:70px}
 .urlbox{font-size:12px;word-break:break-all;background:var(--bg);border-radius:8px;padding:8px 10px}
 
-/* 状態記号 ○ △ × は紙の希望表と同じ字形で見せる */
+/* 状態記号 ○ × は紙の希望表と同じ字形で見せる（○＝勤務可能時間） */
 .sym{font-family:var(--f-display);font-weight:700}
-.s-o{color:var(--ok)} .s-p{color:var(--part)} .s-x{color:var(--ng)}
+.s-o{color:var(--ok)} .s-p{color:var(--ok)} .s-x{color:var(--ng)}
 
-.brushes{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.brushes{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
 .brush{border:1.5px solid var(--line);background:var(--surface);border-radius:12px;padding:8px 4px;display:flex;flex-direction:column;align-items:center;gap:0;font-size:12px;color:var(--muted)}
 .brush .sym{font-size:22px;line-height:1.2}
 .brush[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft);color:var(--ink)}
@@ -106,7 +106,7 @@ button.cell{cursor:pointer}
 .cell .big{font-family:var(--f-display);font-size:21px;line-height:1.15}
 .cell .tiny{font-size:10px;line-height:1.25;color:var(--muted);white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
 .cell.o{background:var(--ok-soft);border-color:transparent}
-.cell.p{background:var(--part-soft);border-color:transparent}
+.cell.p{background:var(--ok-soft);border-color:transparent}
 .cell.x{background:var(--ng-soft);border-color:transparent}
 .cell.short{background:var(--ng-soft);border-color:transparent}
 .cell.half{background:var(--part-soft);border-color:transparent}
@@ -207,7 +207,8 @@ const LS = {
   del(k){ try{ localStorage.removeItem(k); }catch{} }
 };
 const WD = '日月火水木金土';
-const SYM = {o:'○', p:'△', x:'×'};
+// p＝勤務可能時間（何時〜何時）。o は以前の「出勤できる（終日）」の提出
+const SYM = {o:'○', p:'○', x:'×'};
 // 時刻は 0:00 からの分で持つ（540 = 9:00）
 const DEFAULT_SETTINGS = { store:'', deadline:'', open:540, close:1260, bands:[{s:540, e:1260, n:2}], presets:['9:00-15:00', '15:00-21:00', '9:00-21:00'] };
 const API_URL = String(window.SHIFT_API_URL || '').trim();
@@ -223,7 +224,7 @@ const uid = p => p + Date.now().toString(36) + Math.random().toString(36).slice(
 const S = {
   mode:'loading', err:'', staff:{}, avail:{}, shifts:{}, settings:null,
   month:nextMonth(), tab:LS.get('sb.tab', 'req'), me:LS.get('sb.me', ''), key:LS.get('sb.key', ''),
-  brush:'o', partA:LS.get('sb.partA', 540), partB:LS.get('sb.partB', 900), lastAs:null, edit:null, draft:{days:{}, remark:''}, draftKey:'', dirty:false,
+  brush:'p', partA:LS.get('sb.partA', 540), partB:LS.get('sb.partB', 1260), lastAs:null, edit:null, draft:{days:{}, remark:''}, draftKey:'', dirty:false,
   isOwner:false, selDay:null, showNg:false, confirmDel:null, needRender:false, sending:false
 };
 // 古い形式（早番・遅番）の設定にも、足りない項目は初期値を補う
@@ -342,8 +343,10 @@ function parseRange(t){
 function hoursOf(){ const st = settings(), o = Number(st.open ?? 540), c = Number(st.close ?? 1260); return c > o ? {o, c} : {o:540, c:1260}; }
 function ticks(){ const {o, c} = hoursOf(), a = []; for(let t = o; t < c; t += STEP) a.push(t); return a; }
 function timeOpts(sel, from, to){ let h = ''; for(let t = from; t <= to; t += STEP) h += `<option value="${t}" ${t === sel ? 'selected' : ''}>${fmt(t)}</option>`; return h; }
+// カレンダーの小さいマス用（9:00-21:00 → 9-21、9:30-15:00 → 9:30-15）
+const shortR = (a, b) => [a, b].map(t => t % 60 ? fmt(t) : String(t / 60)).join('-');
 const presets = () => (settings().presets || []).map(parseRange).filter(Boolean);
-// 希望から、その日に入れる時間帯を出す（○は開店〜閉店、時間の読めない△は null）
+// 希望から、その日に入れる時間帯を出す（以前の○は開店〜閉店、時間の読めないものは null）
 function availRange(e){
   if(!e || e.s === 'x') return null;
   const {o, c} = hoursOf();
@@ -433,12 +436,12 @@ function viewReq(){
     ${who}
   </section>`;
   if(!S.me) return head;
-  const brushes = [['o','○','出勤できる'], ['p','△','時間指定'], ['x','×','出勤できない'], ['c','消','消す']]
+  const brushes = [['p','○','勤務可能時間'], ['x','×','出勤できない'], ['c','消','消す']]
     .map(([k, s, l]) => `<button class="brush" data-act="brush" data-b="${k}" aria-pressed="${S.brush === k}"><span class="sym s-${k}">${s}</span>${l}</button>`).join('');
   const cal = calGrid(S.month, (i, d, wcls) => {
     const e = S.draft.days[d];
     return `<button class="cell ${wcls} ${e ? e.s : ''}" data-act="paint" data-day="${d}" aria-label="${dayLabel(S.month, i)} ${e ? SYM[e.s] : '未入力'}">
-      <span class="dn">${i}</span><span class="big sym s-${e?.s || ''}">${e ? SYM[e.s] : ''}</span>${e?.t ? `<span class="tiny">${esc(e.t)}</span>` : ''}</button>`;
+      <span class="dn">${i}</span><span class="big sym s-${e?.s || ''}">${e ? SYM[e.s] : ''}</span>${e?.t ? `<span class="tiny">${esc(e.b > e.a ? shortR(e.a, e.b) : e.t)}</span>` : ''}</button>`;
   });
   const cnt = {o:0, p:0, x:0}; Object.values(S.draft.days).forEach(e => cnt[e.s]++);
   const {n} = monthInfo(S.month);
@@ -446,16 +449,16 @@ function viewReq(){
   <section class="card">
     <div class="brushes">${brushes}</div>
     ${S.brush === 'p' ? (() => { const {o, c} = hoursOf(); return `<div class="row" style="flex-wrap:nowrap">
-      <div class="field" style="flex:1"><label for="partA">△ 何時から</label><select id="partA">${timeOpts(S.partA, o, c - STEP)}</select></div>
+      <div class="field" style="flex:1"><label for="partA">何時から</label><select id="partA">${timeOpts(S.partA, o, c - STEP)}</select></div>
       <span class="tilde">〜</span>
       <div class="field" style="flex:1"><label for="partB">何時まで</label><select id="partB">${timeOpts(S.partB, o + STEP, c)}</select></div></div>`; })() : ''}
-    <p class="muted">記号を選んでから日付をタップ。同じ記号でもう一度タップすると消えます。</p>
+    <p class="muted">勤務できる時間を選んでから日付をタップ。同じものでもう一度タップすると消えます。</p>
     ${cal}
     <div class="row between">
-      <span class="muted num"><span class="sym s-o">○</span>${cnt.o} <span class="sym s-p">△</span>${cnt.p} <span class="sym s-x">×</span>${cnt.x}　未入力 ${n - cnt.o - cnt.p - cnt.x}</span>
+      <span class="muted num"><span class="sym s-p">○</span>${cnt.o + cnt.p} <span class="sym s-x">×</span>${cnt.x}　未入力 ${n - cnt.o - cnt.p - cnt.x}</span>
     </div>
     <div class="row">
-      <button class="btn small" data-act="fill">未入力を全部○</button>
+      <button class="btn small" data-act="fill">未入力を全部この時間に</button>
       <button class="btn small" data-act="weekend">土日を×</button>
       <button class="btn small" data-act="clearall">全部消す</button>
     </div>
@@ -476,7 +479,7 @@ function viewSum(){
     const r = dayStats(m, d), can = r.o.length + r.p.length, need = dayNeed(sh, d);
     const cls = need ? (can >= need ? 'full' : 'short') : '';
     return `<button class="cell ${wcls} ${cls}" data-act="sumday" data-day="${d}" aria-label="${dayLabel(m, i)} 勤務可能${can}人">
-      <span class="dn">${i}</span><span class="big num">${can}</span><span class="tiny">○${r.o.length} △${r.p.length}</span></button>`;
+      <span class="dn">${i}</span><span class="big num">${can}</span><span class="tiny">○${r.o.length + r.p.length} ×${r.x.length}</span></button>`;
   });
   const {n} = monthInfo(m);
   let head = '<tr><th>名前</th>', body = '', tot = '<tr class="total"><td>可能人数</td>';
@@ -531,9 +534,9 @@ function viewShift(){
     const e = availDoc(m, s.id)?.days?.[d], ar = availRange(e), v = today[s.id], as = v && v.e > v.s ? v : null;
     const cells = tk.map(t => {
       const inA = as && as.s <= t && t < as.e, inV = ar && ar.s <= t && t < ar.e;
-      return `<span class="${inA ? (inV || !code ? 'as' : 'as warn') : inV ? (code === 'p' ? 'pv' : 'av') : ''}"></span>`;
+      return `<span class="${inA ? (inV || !code ? 'as' : 'as warn') : inV ? 'av' : ''}"></span>`;
     }).join('');
-    const want = code === 'p' ? `△ ${e?.t || '時間指定'}` : code === 'o' ? '○ 出勤できる' : code === 'x' ? '× 出勤できない' : '未回答';
+    const want = code === 'p' ? `○ ${e?.t || '時間の指定なし'}` : code === 'o' ? '○ 終日' : code === 'x' ? '× 出勤できない' : '未回答';
     return `<button class="srow ${as ? 'on' : ''} ${code === 'x' && !as ? 'dim' : ''}" data-act="editas" data-staff="${esc(s.id)}">
       <span class="srow-top"><span class="nm"><span class="sym s-${code}">${code ? SYM[code] : '—'}</span> ${esc(s.name)}</span><span class="tm num">${as ? fmtR(as.s, as.e) : '未割当'}</span></span>
       <span class="tl" style="--n:${N}">${cells}</span>
@@ -558,7 +561,7 @@ function viewShift(){
     </div>
     <div class="field"><h3>時間ごとの人数</h3>${head}${covRow}</div>
     ${gaps.length ? `<p class="muted" style="color:var(--ng)">足りない時間：${gaps.map(g => `${fmtR(g.s, g.e)} あと${g.lack}人`).join('、')}</p>` : (dayEntries(sh, d).length ? '<p class="muted" style="color:var(--ok)">必要人数を満たしています</p>' : '')}
-    <p class="muted">名前をタップして、入る時間を決めます。<span style="color:var(--ok)">緑</span>は入れる時間、<span style="color:var(--part)">黄</span>は△の時間、<span style="color:var(--accent)">青</span>が決めたシフトです。</p>
+    <p class="muted">名前をタップして、入る時間を決めます。<span style="color:var(--ok)">緑</span>は勤務可能時間、<span style="color:var(--accent)">青</span>が決めたシフトです。</p>
     <label class="row muted" style="font-size:13px"><input type="checkbox" id="showNg" ${S.showNg ? 'checked' : ''}> ×の人も表示する</label>
     <div class="slist">${rows || '<p class="muted">表示できる人がいません</p>'}</div>
   </section>
@@ -581,10 +584,10 @@ function editAssignSheet(id){
   const e = availDoc(m, id)?.days?.[d], ar = availRange(e), {o, c} = hoursOf();
   const def = has ? cur : (e?.s === 'p' && ar) || S.lastAs || {s:o, e:c};
   S.edit = {id, d};
-  const chips = [...(e?.s === 'p' && ar ? [{label:'△の希望どおり ' + fmtR(ar.s, ar.e), ...ar}] : []), ...presets()]
+  const chips = [...(e?.s === 'p' && ar ? [{label:'希望どおり ' + fmtR(ar.s, ar.e), ...ar}] : []), ...presets()]
     .map(p => `<button class="chip" data-act="preset" data-s="${p.s}" data-e="${p.e}">${esc(p.label || fmtR(p.s, p.e))}</button>`).join('');
   openSheet(`<h2>${esc(S.staff[id].name)}　${dayLabel(m, Number(d))}</h2>
-    <p class="muted">希望：${e ? (e.s === 'p' ? '△ ' + esc(e.t || '時間指定') : e.s === 'o' ? '○ 出勤できる' : '× 出勤できない') : '未回答'}</p>
+    <p class="muted">希望：${e ? (e.s === 'p' ? '○ ' + esc(e.t || '時間の指定なし') : e.s === 'o' ? '○ 終日' : '× 出勤できない') : '未回答'}</p>
     ${chips ? `<div class="chips">${chips}</div>` : ''}
     <div class="row" style="flex-wrap:nowrap">
       <div class="field" style="flex:1"><label for="asS">開始</label><select id="asS">${timeOpts(def.s, o, c - STEP)}</select></div>
@@ -678,14 +681,14 @@ function toast(msg){ const t = $('#toast'); t.textContent = msg; t.hidden = fals
 function sumDaySheet(d){
   const r = dayStats(S.month, d);
   const grp = (k, label, list) => `<div class="field"><h3><span class="sym s-${k}">${label}</span> ${list.length}人</h3><div class="chips">${list.map(x => `<span class="chip">${esc(x.st.name)}${x.t ? ` <span class="t">${esc(x.t)}</span>` : ''}</span>`).join('') || '<span class="muted">なし</span>'}</div></div>`;
-  openSheet(`<h2>${dayLabel(S.month, Number(d))}</h2>${grp('o', '○ 出勤できる', r.o)}${grp('p', '△ 時間指定', r.p)}${grp('x', '× 出勤できない', r.x)}${grp('', '未回答', r.n)}
+  openSheet(`<h2>${dayLabel(S.month, Number(d))}</h2>${grp('p', '○ 勤務可能時間', r.p)}${r.o.length ? grp('o', '○ 終日', r.o) : ''}${grp('x', '× 出勤できない', r.x)}${grp('', '未回答', r.n)}
     <button class="btn primary block" data-act="goshift" data-day="${d}">この日のシフトを作る</button>`);
 }
 
 /* ---------- 提出 ---------- */
 async function submit(){
   if(!S.me){ toast('名前を選んでください'); return; }
-  if(!Object.keys(S.draft.days).length){ toast('カレンダーに○△×を入力してください'); return; }
+  if(!Object.keys(S.draft.days).length){ toast('カレンダーに勤務可能時間か×を入力してください'); return; }
   if(S.sending) return;
   S.sending = true; render();
   try{
@@ -733,13 +736,18 @@ document.addEventListener('click', async ev => {
   else if(a === 'brush'){ S.brush = b.dataset.b; render(); }
   else if(a === 'paint'){
     const d = b.dataset.day, cur = S.draft.days[d];
-    if(S.brush === 'p' && S.partB <= S.partA){ toast('△の終わりの時間を、始まりより後にしてください'); return; }
+    if(S.brush === 'p' && S.partB <= S.partA){ toast('終わりの時間を、始まりより後にしてください'); return; }
     const t = fmtR(S.partA, S.partB);
     if(S.brush === 'c' || (cur && cur.s === S.brush && (S.brush !== 'p' || cur.t === t))) delete S.draft.days[d];
     else S.draft.days[d] = S.brush === 'p' ? {s:'p', t, a:S.partA, b:S.partB} : {s:S.brush};
     markDirty(); render();
   }
-  else if(a === 'fill'){ const {n} = monthInfo(S.month); for(let i = 1; i <= n; i++) if(!S.draft.days[dk(i)]) S.draft.days[dk(i)] = {s:'o'}; markDirty(); render(); }
+  else if(a === 'fill'){
+    if(S.partB <= S.partA){ toast('終わりの時間を、始まりより後にしてください'); return; }
+    const {n} = monthInfo(S.month), t = fmtR(S.partA, S.partB);
+    for(let i = 1; i <= n; i++) if(!S.draft.days[dk(i)]) S.draft.days[dk(i)] = {s:'p', t, a:S.partA, b:S.partB};
+    markDirty(); render();
+  }
   else if(a === 'weekend'){ const {n} = monthInfo(S.month); for(let i = 1; i <= n; i++){ const w = dow(S.month, i); if(w === 0 || w === 6) S.draft.days[dk(i)] = {s:'x'}; } markDirty(); render(); }
   else if(a === 'clearall'){ S.draft.days = {}; markDirty(); render(); }
   else if(a === 'submit') submit();

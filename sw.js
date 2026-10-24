@@ -1,6 +1,6 @@
 // アプリの画面部品を端末に保存して、電波が弱くても起動できるようにする。
 // データ（Apps Script への通信）は保存しない。中身を直したら CACHE の番号を上げる。
-const CACHE = 'shift-v2';
+const CACHE = 'shift-v3';
 const SHELL = ['./', 'index.html', 'config.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'];
 
 self.addEventListener('install', e => {
@@ -17,7 +17,8 @@ self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET' || u.origin !== location.origin) return;
   e.respondWith(caches.open(CACHE).then(async c => {
     const hit = await c.match(e.request, { ignoreSearch: true });
-    const net = fetch(e.request).then(r => {
+    // ブラウザの一時保存を使わず、毎回サーバーに最新か確かめる
+    const net = fetch(u.href, { cache: 'no-cache' }).then(r => {
       if (r.ok) c.put(u.search ? new Request(u.origin + u.pathname) : e.request, r.clone());
       return r;
     }).catch(() => hit);
