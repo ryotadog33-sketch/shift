@@ -1,0 +1,744 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>シフト希望</title>
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#171F32" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&family=Zen+Kaku+Gothic+New:wght@700&display=swap">
+<style>
+/* Layout: 紙のシフト希望表をスマホに置き換えた一画面アプリ。上に月の切り替え、下にタブ、中身は1カラム */
+:root{
+  --bg:#F2F4F8; --surface:#FFFFFF; --ink:#18213A; --muted:#5A6582; --line:#DAE0EB; --line-strong:#B9C2D6;
+  --accent:#2C52CF; --accent-ink:#FFFFFF; --accent-soft:#E5EBFC;
+  --ok:#137F4A; --ok-soft:#DCF2E5; --part:#A86200; --part-soft:#FBEED3; --ng:#BE3446; --ng-soft:#FAE2E5;
+  --sat:#2D66CF; --sun:#C63447; --shadow:0 6px 24px rgba(24,33,58,.14);
+  --f-body:"BIZ UDPGothic","Hiragino Sans","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  --f-display:"Zen Kaku Gothic New","Hiragino Sans","Yu Gothic UI",system-ui,sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0E1321; --surface:#171F32; --ink:#E6EBF6; --muted:#98A4C0; --line:#28324B; --line-strong:#3A4766;
+  --accent:#7D9BFF; --accent-ink:#0E1321; --accent-soft:#212E57;
+  --ok:#4CC78A; --ok-soft:#163828; --part:#EFAE48; --part-soft:#3D2F17; --ng:#F07384; --ng-soft:#45202A;
+  --sat:#83A8FF; --sun:#FF8797; --shadow:0 6px 24px rgba(0,0,0,.45); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0E1321; --surface:#171F32; --ink:#E6EBF6; --muted:#98A4C0; --line:#28324B; --line-strong:#3A4766;
+  --accent:#7D9BFF; --accent-ink:#0E1321; --accent-soft:#212E57;
+  --ok:#4CC78A; --ok-soft:#163828; --part:#EFAE48; --part-soft:#3D2F17; --ng:#F07384; --ng-soft:#45202A;
+  --sat:#83A8FF; --sun:#FF8797; --shadow:0 6px 24px rgba(0,0,0,.45); color-scheme:dark}
+
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.6;-webkit-tap-highlight-color:transparent}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--surface)}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+[hidden]{display:none!important}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--surface);border-bottom:1px solid var(--line);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:10px}
+.top-in{max-width:760px;margin:0 auto;display:flex;align-items:center;gap:8px}
+.brand{font-family:var(--f-display);font-weight:700;font-size:15px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.monthsw{display:flex;align-items:center;gap:4px}
+.monthsw b{font-family:var(--f-display);font-size:18px;min-width:6.6em;text-align:center}
+.icon-btn{width:38px;height:38px;border-radius:10px;border:1px solid var(--line);background:var(--surface);font-size:18px;line-height:1;flex:none}
+.icon-btn.spin{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+main{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:16px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-block:16px calc(92px + env(safe-area-inset-bottom,0px))}
+
+.tabs{position:fixed;left:0;right:0;bottom:0;z-index:6;background:var(--surface);border-top:1px solid var(--line);
+  display:flex;justify-content:center;
+  padding-left:max(8px,env(safe-area-inset-left,0px));padding-right:max(8px,env(safe-area-inset-right,0px));
+  padding-top:6px;padding-bottom:calc(6px + env(safe-area-inset-bottom,0px))}
+.tabs-in{display:flex;gap:4px;width:100%;max-width:520px}
+.tab{flex:1;border:0;background:none;border-radius:10px;padding:6px 4px;display:flex;flex-direction:column;align-items:center;gap:2px;color:var(--muted);font-size:12px}
+.tab .g{font-family:var(--f-display);font-size:19px;line-height:1.2}
+.tab[aria-current="page"]{color:var(--accent);background:var(--accent-soft)}
+
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+h2{font-family:var(--f-display);font-size:17px;margin:0;text-wrap:balance}
+h3{font-size:14px;margin:0;color:var(--muted);font-weight:700;letter-spacing:.04em}
+p{margin:0}
+.muted{color:var(--muted);font-size:13px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.between{justify-content:space-between}
+.banner{border:1px solid var(--ng);border-radius:12px;padding:10px 12px;font-size:13px;color:var(--ng);background:var(--ng-soft);display:flex;gap:8px;align-items:center;justify-content:space-between}
+
+.btn{border:1px solid var(--line-strong);background:var(--surface);border-radius:10px;padding:9px 14px;font-weight:700;font-size:14px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.block{width:100%;padding:13px;font-size:16px}
+.btn.small{padding:6px 10px;font-size:13px}
+.btn.danger{color:var(--ng);border-color:var(--ng)}
+.btn:disabled{opacity:.6}
+.field{display:flex;flex-direction:column;gap:4px;min-width:0}
+.field label{font-size:12px;color:var(--muted);font-weight:700;letter-spacing:.04em}
+input[type=text],select,textarea{border:1px solid var(--line-strong);background:var(--surface);border-radius:10px;padding:9px 11px;width:100%;min-width:0;font-size:16px}
+textarea{resize:vertical;min-height:70px}
+.urlbox{font-size:12px;word-break:break-all;background:var(--bg);border-radius:8px;padding:8px 10px}
+
+/* 状態記号 ○ △ × は紙の希望表と同じ字形で見せる */
+.sym{font-family:var(--f-display);font-weight:700}
+.s-o{color:var(--ok)} .s-p{color:var(--part)} .s-x{color:var(--ng)}
+
+.brushes{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.brush{border:1.5px solid var(--line);background:var(--surface);border-radius:12px;padding:8px 4px;display:flex;flex-direction:column;align-items:center;gap:0;font-size:12px;color:var(--muted)}
+.brush .sym{font-size:22px;line-height:1.2}
+.brush[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft);color:var(--ink)}
+
+.cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.cal .wd{text-align:center;font-size:12px;color:var(--muted);font-weight:700}
+.cal .wd.sun,.cell.sun .dn{color:var(--sun)} .cal .wd.sat,.cell.sat .dn{color:var(--sat)}
+.cell{min-height:56px;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:4px 2px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:0;min-width:0;overflow:hidden}
+button.cell{cursor:pointer}
+.cell .dn{font-size:12px;line-height:1.3;font-variant-numeric:tabular-nums}
+.cell .big{font-family:var(--f-display);font-size:21px;line-height:1.15}
+.cell .tiny{font-size:10px;line-height:1.25;color:var(--muted);white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.cell.o{background:var(--ok-soft);border-color:transparent}
+.cell.p{background:var(--part-soft);border-color:transparent}
+.cell.x{background:var(--ng-soft);border-color:transparent}
+.cell.short{background:var(--ng-soft);border-color:transparent}
+.cell.half{background:var(--part-soft);border-color:transparent}
+.cell.full{background:var(--ok-soft);border-color:transparent}
+.cell.sel{outline:2.5px solid var(--accent);outline-offset:-1px}
+.blank{min-height:0;border:0}
+
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:13px;background:var(--surface)}
+.chip.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.chip.on .sym{color:inherit}
+.chip .t{font-size:11px;color:var(--muted)} .chip.on .t{color:inherit;opacity:.85}
+
+.cand{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px}
+.cand button{text-align:left;border:1.5px solid var(--line);background:var(--surface);border-radius:10px;padding:7px 9px;display:flex;flex-direction:column;gap:0;min-width:0}
+.cand button .nm{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cand button .meta{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cand button[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}
+.cand button.dim{opacity:.55}
+
+.slot{border-top:1px solid var(--line);padding-top:12px;display:flex;flex-direction:column;gap:8px}
+.slot:first-of-type{border-top:0;padding-top:0}
+.stepper{display:inline-flex;align-items:center;border:1px solid var(--line-strong);border-radius:10px;overflow:hidden}
+.stepper button{border:0;background:none;width:34px;height:32px;font-size:16px}
+.stepper span{min-width:3.4em;text-align:center;font-size:13px}
+.pill{display:inline-block;border-radius:999px;padding:1px 9px;font-size:12px;font-weight:700}
+.pill.ok{background:var(--ok-soft);color:var(--ok)} .pill.short{background:var(--ng-soft);color:var(--ng)} .pill.half{background:var(--part-soft);color:var(--part)}
+
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px}
+table.mx{border-collapse:separate;border-spacing:0;font-size:12px;font-variant-numeric:tabular-nums}
+.mx th,.mx td{border-bottom:1px solid var(--line);border-right:1px solid var(--line);padding:4px 0;text-align:center;min-width:28px;background:var(--surface)}
+.mx th:first-child,.mx td:first-child{position:sticky;left:0;z-index:1;text-align:left;padding:4px 8px;min-width:6.5em;max-width:8em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:700}
+.mx thead th{font-weight:400;color:var(--muted);line-height:1.2}
+.mx .sun{color:var(--sun)} .mx .sat{color:var(--sat)}
+.mx td .sym{font-size:14px}
+.mx tr.total td{font-weight:700;background:var(--bg)}
+
+.list{display:flex;flex-direction:column}
+.list .li{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+.list .li:last-child{border-bottom:0}
+.list .li .grow{flex:1;min-width:0}
+.me-hl{background:var(--accent-soft);border-radius:6px;padding:0 4px;font-weight:700}
+
+.sheet-wrap{position:fixed;inset:0;z-index:20;background:rgba(10,14,26,.45);display:flex;align-items:flex-end;justify-content:center}
+.sheet{background:var(--surface);width:100%;max-width:560px;max-height:85%;overflow:auto;border-radius:18px 18px 0 0;box-shadow:var(--shadow);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-top:16px;padding-bottom:calc(20px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:12px}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:30;background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:999px;font-size:14px;box-shadow:var(--shadow);max-width:calc(100% - 32px)}
+.empty{padding:24px 8px;text-align:center;color:var(--muted);display:flex;flex-direction:column;gap:10px;align-items:center}
+@media (prefers-reduced-motion: no-preference){.btn,.cell,.brush,.chip,.cand button{transition:background-color .15s,border-color .15s}}
+@media (prefers-reduced-motion: reduce){.icon-btn.spin{animation:none;opacity:.5}}
+</style>
+<script src="config.js"></script>
+</head>
+<body>
+<header class="top"><div class="top-in">
+  <div class="brand" id="brand">シフト希望</div>
+  <div class="monthsw">
+    <button class="icon-btn" data-act="month" data-d="-1" aria-label="前の月">‹</button>
+    <b id="monthLabel" class="num"></b>
+    <button class="icon-btn" data-act="month" data-d="1" aria-label="次の月">›</button>
+  </div>
+  <button class="icon-btn" id="refreshBtn" data-act="refresh" aria-label="最新にする">↻</button>
+</div></header>
+<main id="view"><div class="empty">読み込み中…</div></main>
+<nav class="tabs"><div class="tabs-in" id="tabs"></div></nav>
+<div id="sheetWrap" class="sheet-wrap" hidden><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
+<div id="toast" class="toast" hidden></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const LS = {
+  get(k, d){ try{ const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); }catch{ return d; } },
+  set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} },
+  del(k){ try{ localStorage.removeItem(k); }catch{} }
+};
+const WD = '日月火水木金土';
+const SYM = {o:'○', p:'△', x:'×'};
+const DEFAULT_SETTINGS = { store:'', deadline:'', slots:[{id:'a', name:'早番', time:'', need:1}, {id:'b', name:'遅番', time:'', need:1}] };
+const API_URL = String(window.SHIFT_API_URL || '').trim();
+
+const ym = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+const dk = i => String(i).padStart(2,'0');
+function nextMonth(){ const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()+1); return ym(d); }
+function monthInfo(m){ const [y, mo] = m.split('-').map(Number); return { y, mo, n:new Date(y, mo, 0).getDate(), first:new Date(y, mo-1, 1).getDay() }; }
+const dow = (m, i) => { const {y, mo} = monthInfo(m); return new Date(y, mo-1, i).getDay(); };
+const dayLabel = (m, i) => `${monthInfo(m).mo}月${i}日(${WD[dow(m, i)]})`;
+const uid = p => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+const S = {
+  mode:'loading', err:'', staff:{}, avail:{}, shifts:{}, settings:null,
+  month:nextMonth(), tab:LS.get('sb.tab', 'req'), me:LS.get('sb.me', ''), key:LS.get('sb.key', ''),
+  brush:'o', partTime:LS.get('sb.partTime', ''), draft:{days:{}, remark:''}, draftKey:'', dirty:false,
+  isOwner:false, selDay:null, showNg:false, confirmDel:null, needRender:false, sending:false
+};
+const settings = () => S.settings || DEFAULT_SETTINGS;
+const staffList = () => Object.entries(S.staff).filter(([, v]) => v && v.active !== false)
+  .map(([id, v]) => ({id, ...v})).sort((a, b) => (a.order||0) - (b.order||0));
+const availDoc = (m, id) => S.avail[m + '_' + id];
+
+/* ---------- 保存先：Googleスプレッドシート（Apps Script の受付窓口） ---------- */
+let inflight = 0;
+async function api(action, payload = {}){
+  if(!API_URL) throw {code:'no_api'};
+  inflight++;
+  try{
+    let r;
+    // text/plain で送ると、ブラウザの事前確認（CORS）なしで Apps Script に届く
+    try{ r = await fetch(API_URL, {method:'POST', body:JSON.stringify({action, key:S.key || '', ...payload})}); }
+    catch{ throw {code:'offline'}; }
+    let j; try{ j = await r.json(); }catch{ throw {code:'bad_response'}; }
+    if(!j.ok) throw {code:j.error};
+    return j.data;
+  }finally{ inflight--; }
+}
+function saveErr(e){
+  const c = e && e.code;
+  if(c === 'offline') return '通信できません。電波の良いところでもう一度お試しください';
+  if(c === 'forbidden') return '店長の合言葉が違うため保存できません';
+  if(c === 'unknown_staff') return 'この名前は登録されていません。店長に確認してください';
+  if(c === 'not_setup') return '受付窓口の準備（setup）がまだ終わっていません';
+  if(c === 'no_api') return 'config.js に受付窓口のURLが書かれていません';
+  return '保存できませんでした。もう一度お試しください';
+}
+const store = {
+  set(path, d){
+    const [c, id] = path.split('/');
+    if(c === 'staff') return api('saveStaff', {id, data:d});
+    if(c === 'settings') return api('saveSettings', {data:d});
+    if(c === 'shifts') return api('saveShift', {month:id, data:d});
+    return Promise.reject({code:'bad_path'});
+  }
+};
+/* 同じドキュメントへの連続書き込みは1つにまとめ、順番に送る */
+const pending = {};
+function queueWrite(path, data, delay = 600){
+  const p = pending[path] || (pending[path] = {});
+  p.data = data; clearTimeout(p.timer); p.timer = setTimeout(() => flush(path), delay);
+}
+async function flush(path){
+  const p = pending[path]; if(p.running){ p.again = true; return; }
+  const data = p.data; p.data = null; if(!data) return;
+  p.running = true;
+  try{ await store.set(path, data); }catch(e){ toast(saveErr(e)); }
+  p.running = false;
+  if(p.again || p.data){ p.again = false; flush(path); }
+}
+const isPending = path => !!(pending[path] && (pending[path].data || pending[path].running));
+const anyPending = () => Object.keys(pending).some(isPending);
+
+/* ---------- 読み込み ---------- */
+let loading = null;
+function refresh(){
+  if(loading) return loading;
+  $('#refreshBtn').classList.add('spin');
+  loading = (async () => {
+    try{
+      const d = await api('load', {staffId:S.me || ''});
+      if(S.key && !d.isOwner){ S.key = ''; LS.del('sb.key'); toast('店長の合言葉が違います。従業員用の画面で開きます'); }
+      S.isOwner = !!d.isOwner;
+      S.staff = d.staff || {};
+      S.avail = d.avail || {};
+      const sh = {...(d.shifts || {})};
+      for(const m of Object.keys(S.shifts)) if(isPending('shifts/' + m)) sh[m] = S.shifts[m];
+      S.shifts = sh;
+      if(!isPending('settings/main')) S.settings = d.settings ? {...DEFAULT_SETTINGS, ...d.settings} : null;
+      if(S.me && !S.staff[S.me]){ S.me = ''; LS.set('sb.me', ''); }
+      S.mode = 'ready'; S.err = '';
+    }catch(e){
+      S.err = e && e.code === 'offline' ? '通信できません。表示は前回読み込んだ内容です' : saveErr(e);
+      if(S.mode === 'loading') S.mode = 'error';
+    }
+    loading = null; $('#refreshBtn').classList.remove('spin'); render();
+  })();
+  return loading;
+}
+
+/* ---------- 下書き（自分の希望）：通信できなくても消えないよう端末にも残す ---------- */
+const draftStoreKey = () => S.month + '_' + S.me;
+function syncDraft(){
+  const key = draftStoreKey();
+  if(S.draftKey === key && S.dirty) return;
+  S.draftKey = key;
+  const saved = S.me ? LS.get('sb.drafts', {})[key] : null;
+  if(saved){ S.draft = JSON.parse(JSON.stringify(saved)); S.dirty = true; return; }
+  const doc = S.me ? availDoc(S.month, S.me) : null;
+  S.dirty = false;
+  S.draft = { days:JSON.parse(JSON.stringify(doc?.days || {})), remark:doc?.remark || '' };
+}
+function markDirty(){
+  S.dirty = true;
+  if(!S.me) return;
+  const all = LS.get('sb.drafts', {}); all[draftStoreKey()] = S.draft; LS.set('sb.drafts', all);
+}
+function clearDraft(){ const all = LS.get('sb.drafts', {}); delete all[draftStoreKey()]; LS.set('sb.drafts', all); }
+
+/* ---------- シフト ---------- */
+function getShift(m){ return S.shifts[m] || { month:m, days:{}, need:{}, published:false }; }
+function editShift(m, fn){
+  const s = JSON.parse(JSON.stringify(getShift(m)));
+  s.days = s.days || {}; s.need = s.need || {};
+  fn(s); s.updatedAt = Date.now();
+  S.shifts[m] = s; queueWrite('shifts/' + m, s); render();
+}
+const needFor = (sh, d, slot) => sh.need?.[d]?.[slot.id] ?? slot.need ?? 0;
+function dayNeed(sh, d){ return settings().slots.reduce((a, sl) => a + Number(needFor(sh, d, sl) || 0), 0); }
+function dayAssigned(sh, d){ const set = new Set(); Object.values(sh.days?.[d] || {}).forEach(a => a.forEach(id => S.staff[id]?.active !== false && set.add(id))); return set; }
+function assignedCount(sh, id){ let c = 0; Object.values(sh.days || {}).forEach(day => { if(Object.values(day).some(a => a.includes(id))) c++; }); return c; }
+
+function dayStats(m, d){
+  const r = {o:[], p:[], x:[], n:[]};
+  for(const st of staffList()){
+    const e = availDoc(m, st.id)?.days?.[d];
+    if(!e) r.n.push({st}); else r[SYM[e.s] ? e.s : 'n'].push({st, t:e.t});
+  }
+  return r;
+}
+
+/* ---------- 描画 ---------- */
+function isTyping(){ const a = document.activeElement; return a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && $('#view').contains(a); }
+function render(){
+  if(isTyping()){ S.needRender = true; return; }
+  S.needRender = false;
+  const {y, mo} = monthInfo(S.month);
+  $('#monthLabel').textContent = `${y}年${mo}月`;
+  $('#brand').textContent = settings().store || 'シフト希望';
+  const tabs = S.isOwner
+    ? [['req','○','希望提出'], ['sum','∑','集計'], ['shift','▦','シフト作成'], ['set','⚙','設定']]
+    : [['req','○','希望提出'], ['my','▦','シフト']];
+  if(!tabs.some(t => t[0] === S.tab)) S.tab = 'req';
+  $('#tabs').innerHTML = tabs.map(([k, g, l]) => `<button class="tab" data-act="tab" data-t="${k}" ${S.tab === k ? 'aria-current="page"' : ''}><span class="g">${g}</span>${l}</button>`).join('');
+  if(S.mode === 'loading'){ $('#view').innerHTML = '<div class="empty">読み込み中…</div>'; return; }
+  if(S.mode === 'error'){
+    $('#view').innerHTML = `<section class="card"><div class="empty"><h2>読み込めませんでした</h2><p>${esc(S.err)}</p><button class="btn primary" data-act="refresh">もう一度読み込む</button></div></section>`;
+    return;
+  }
+  const v = { req:viewReq, sum:viewSum, shift:viewShift, set:viewSet, my:viewMy }[S.tab]();
+  const banner = S.err ? `<div class="banner"><span>${esc(S.err)}</span><button class="btn small" data-act="refresh">再読み込み</button></div>` : '';
+  $('#view').innerHTML = banner + v;
+}
+
+function calGrid(m, cellFn){
+  const {n, first} = monthInfo(m);
+  let h = '<div class="cal">' + [...WD].map((w, i) => `<div class="wd ${i === 0 ? 'sun' : i === 6 ? 'sat' : ''}">${w}</div>`).join('');
+  for(let i = 0; i < first; i++) h += '<div class="blank"></div>';
+  for(let i = 1; i <= n; i++){ const w = dow(m, i); h += cellFn(i, dk(i), w === 0 ? 'sun' : w === 6 ? 'sat' : ''); }
+  return h + '</div>';
+}
+
+function viewReq(){
+  syncDraft();
+  const staff = staffList();
+  if(!staff.length) return `<section class="card"><div class="empty"><h2>まだ従業員が登録されていません</h2>
+    ${S.isOwner ? '<p>「設定」で従業員の名前を追加すると、ここで名前を選んで希望を出せるようになります。</p><button class="btn primary" data-act="tab" data-t="set">設定を開く</button>' : '<p>店長が名前を登録するまでお待ちください。</p>'}</div></section>`;
+  const doc = S.me ? availDoc(S.month, S.me) : null;
+  const st = settings();
+  const status = doc
+    ? `<span class="pill ok">提出済み ${new Date(doc.submittedAt).toLocaleString('ja-JP', {month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit'})}</span>`
+    : (S.me ? '<span class="pill short">未提出</span>' : '');
+  const who = `<div class="field"><label for="meSel">あなたの名前</label>
+    <select id="meSel"><option value="">— 選んでください —</option>${staff.map(s => `<option value="${esc(s.id)}" ${s.id === S.me ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></div>`;
+  const head = `<section class="card">
+    <div class="row between"><h2>${monthInfo(S.month).mo}月の勤務できる日</h2>${status}</div>
+    ${st.deadline ? `<p class="muted">提出締切：${esc(st.deadline)}</p>` : ''}
+    ${who}
+  </section>`;
+  if(!S.me) return head;
+  const brushes = [['o','○','出勤できる'], ['p','△','時間指定'], ['x','×','出勤できない'], ['c','消','消す']]
+    .map(([k, s, l]) => `<button class="brush" data-act="brush" data-b="${k}" aria-pressed="${S.brush === k}"><span class="sym s-${k}">${s}</span>${l}</button>`).join('');
+  const cal = calGrid(S.month, (i, d, wcls) => {
+    const e = S.draft.days[d];
+    return `<button class="cell ${wcls} ${e ? e.s : ''}" data-act="paint" data-day="${d}" aria-label="${dayLabel(S.month, i)} ${e ? SYM[e.s] : '未入力'}">
+      <span class="dn">${i}</span><span class="big sym s-${e?.s || ''}">${e ? SYM[e.s] : ''}</span>${e?.t ? `<span class="tiny">${esc(e.t)}</span>` : ''}</button>`;
+  });
+  const cnt = {o:0, p:0, x:0}; Object.values(S.draft.days).forEach(e => cnt[e.s]++);
+  const {n} = monthInfo(S.month);
+  return head + `
+  <section class="card">
+    <div class="brushes">${brushes}</div>
+    ${S.brush === 'p' ? `<div class="field"><label for="partTime">△の時間（この時間で入力されます）</label><input type="text" id="partTime" value="${esc(S.partTime)}" placeholder="例）10:00-15:00、17時以降"></div>` : ''}
+    <p class="muted">記号を選んでから日付をタップ。同じ記号でもう一度タップすると消えます。</p>
+    ${cal}
+    <div class="row between">
+      <span class="muted num"><span class="sym s-o">○</span>${cnt.o} <span class="sym s-p">△</span>${cnt.p} <span class="sym s-x">×</span>${cnt.x}　未入力 ${n - cnt.o - cnt.p - cnt.x}</span>
+    </div>
+    <div class="row">
+      <button class="btn small" data-act="fill">未入力を全部○</button>
+      <button class="btn small" data-act="weekend">土日を×</button>
+      <button class="btn small" data-act="clearall">全部消す</button>
+    </div>
+  </section>
+  <section class="card">
+    <div class="field"><label for="remark">店長への連絡（任意）</label><textarea id="remark" placeholder="例）月8日くらいまで希望／テスト期間なので少なめで">${esc(S.draft.remark)}</textarea></div>
+    ${S.dirty ? '<p class="muted">まだ提出していない変更があります（この端末には保存されています）。</p>' : ''}
+    <button class="btn primary block" data-act="submit" ${S.sending ? 'disabled' : ''}>${S.sending ? '送信中…' : doc ? '内容を更新して提出' : 'この内容で提出'}</button>
+  </section>`;
+}
+
+function viewSum(){
+  const m = S.month, staff = staffList(), sh = getShift(m);
+  if(!staff.length) return emptyStaff();
+  const submitted = staff.filter(s => availDoc(m, s.id));
+  const missing = staff.filter(s => !availDoc(m, s.id));
+  const cal = calGrid(m, (i, d, wcls) => {
+    const r = dayStats(m, d), can = r.o.length + r.p.length, need = dayNeed(sh, d);
+    const cls = need ? (can >= need ? 'full' : 'short') : '';
+    return `<button class="cell ${wcls} ${cls}" data-act="sumday" data-day="${d}" aria-label="${dayLabel(m, i)} 勤務可能${can}人">
+      <span class="dn">${i}</span><span class="big num">${can}</span><span class="tiny">○${r.o.length} △${r.p.length}</span></button>`;
+  });
+  const {n} = monthInfo(m);
+  let head = '<tr><th>名前</th>', body = '', tot = '<tr class="total"><td>可能人数</td>';
+  for(let i = 1; i <= n; i++){ const w = dow(m, i); head += `<th class="${w === 0 ? 'sun' : w === 6 ? 'sat' : ''}">${i}<br>${WD[w]}</th>`; }
+  for(const s of staff){
+    const doc = availDoc(m, s.id);
+    body += `<tr><td>${esc(s.name)}</td>`;
+    for(let i = 1; i <= n; i++){ const e = doc?.days?.[dk(i)]; body += `<td>${e ? `<span class="sym s-${e.s}">${SYM[e.s]}</span>` : (doc ? '' : '<span class="muted">·</span>')}</td>`; }
+    body += '</tr>';
+  }
+  for(let i = 1; i <= n; i++){ const r = dayStats(m, dk(i)); tot += `<td>${r.o.length + r.p.length}</td>`; }
+  const remarks = submitted.filter(s => availDoc(m, s.id).remark);
+  return `
+  <section class="card">
+    <div class="row between"><h2>提出状況</h2><span class="pill ${missing.length ? 'short' : 'ok'} num">${submitted.length} / ${staff.length}人</span></div>
+    ${missing.length ? `<div><h3>未提出</h3><div class="chips" style="margin-top:6px">${missing.map(s => `<span class="chip">${esc(s.name)}</span>`).join('')}</div></div>` : '<p class="muted">全員提出済みです。</p>'}
+  </section>
+  <section class="card">
+    <h2>日ごとの勤務可能人数</h2>
+    <div class="legend"><span><i style="background:var(--ok-soft)"></i>必要人数を満たす</span><span><i style="background:var(--ng-soft)"></i>必要人数に足りない</span></div>
+    ${cal}
+    <p class="muted">日付をタップすると、誰が入れるかが見られます。必要人数はシフト作成・設定で変えられます。</p>
+  </section>
+  <section class="card">
+    <h2>一覧表</h2>
+    <div class="scroll"><table class="mx"><thead>${head}</tr></thead><tbody>${body}${tot}</tr></tbody></table></div>
+  </section>
+  ${remarks.length ? `<section class="card"><h2>連絡事項</h2><div class="list">${remarks.map(s => `<div class="li"><div class="grow"><b>${esc(s.name)}</b><p class="muted">${esc(availDoc(m, s.id).remark)}</p></div></div>`).join('')}</div></section>` : ''}`;
+}
+
+function viewShift(){
+  const m = S.month, staff = staffList(), sh = getShift(m), st = settings();
+  if(!staff.length) return emptyStaff();
+  const {n} = monthInfo(m);
+  if(!S.selDay || Number(S.selDay) > n) S.selDay = '01';
+  const d = S.selDay, di = Number(d);
+  const cal = calGrid(m, (i, dd, wcls) => {
+    const a = dayAssigned(sh, dd).size, need = dayNeed(sh, dd);
+    const cls = need ? (a >= need ? 'full' : a > 0 ? 'half' : 'short') : (a ? 'full' : '');
+    return `<button class="cell ${wcls} ${cls} ${dd === d ? 'sel' : ''}" data-act="selday" data-day="${dd}" aria-label="${dayLabel(m, i)} ${a}/${need}人">
+      <span class="dn">${i}</span><span class="big num" style="font-size:16px">${a}<span class="tiny">/${need}</span></span></button>`;
+  });
+  const r = dayStats(m, d);
+  const order = [...r.o.map(x => ({...x, s:'o'})), ...r.p.map(x => ({...x, s:'p'})), ...r.n.map(x => ({...x, s:''})), ...(S.showNg ? r.x.map(x => ({...x, s:'x'})) : [])];
+  const today = sh.days?.[d] || {};
+  const slots = st.slots.map(sl => {
+    const ids = (today[sl.id] || []).filter(id => S.staff[id]?.active !== false);
+    const need = Number(needFor(sh, d, sl) || 0);
+    const pill = need ? `<span class="pill ${ids.length >= need ? 'ok' : ids.length ? 'half' : 'short'} num">${ids.length}/${need}人</span>` : `<span class="pill ok num">${ids.length}人</span>`;
+    const cands = order.map(({st:s, s:code, t}) => {
+      const on = ids.includes(s.id);
+      const other = !on && st.slots.some(o => o.id !== sl.id && (today[o.id] || []).includes(s.id));
+      const meta = [code ? SYM[code] + (code === 'p' && t ? ' ' + t : '') : '未回答', `今月${assignedCount(sh, s.id)}日`, other ? '他の枠に入っています' : ''].filter(Boolean).join('・');
+      return `<button data-act="assign" data-slot="${esc(sl.id)}" data-staff="${esc(s.id)}" aria-pressed="${on}" class="${code === 'x' || other ? 'dim' : ''}">
+        <span class="nm"><span class="sym s-${code}">${code ? SYM[code] : '—'}</span> ${esc(s.name)}</span><span class="meta">${esc(meta)}</span></button>`;
+    }).join('');
+    return `<div class="slot">
+      <div class="row between"><div><b>${esc(sl.name)}</b> ${sl.time ? `<span class="muted">${esc(sl.time)}</span>` : ''}</div>${pill}</div>
+      <div class="row"><span class="muted">必要人数</span><span class="stepper"><button data-act="need" data-slot="${esc(sl.id)}" data-d="-1" aria-label="減らす">−</button><span class="num">${need}人</span><button data-act="need" data-slot="${esc(sl.id)}" data-d="1" aria-label="増やす">＋</button></span></div>
+      <div class="cand">${cands || '<p class="muted">候補がいません</p>'}</div>
+    </div>`;
+  }).join('');
+  const tally = staff.map(s => {
+    const doc = availDoc(m, s.id);
+    const can = doc ? Object.values(doc.days || {}).filter(e => e.s !== 'x').length : null;
+    return `<div class="li"><div class="grow">${esc(s.name)}</div><span class="muted num">${can == null ? '未提出' : `入れる日 ${can}日`}</span><b class="num" style="min-width:3.5em;text-align:right">${assignedCount(sh, s.id)}日</b></div>`;
+  }).join('');
+  return `
+  <section class="card">
+    <div class="row between"><h2>シフト作成</h2>${sh.published ? '<span class="pill ok">公開中</span>' : '<span class="pill half">下書き</span>'}</div>
+    <div class="legend"><span><i style="background:var(--ok-soft)"></i>足りている</span><span><i style="background:var(--part-soft)"></i>一部</span><span><i style="background:var(--ng-soft)"></i>未割り当て</span></div>
+    ${cal}
+  </section>
+  <section class="card">
+    <div class="row between">
+      <button class="icon-btn" data-act="dstep" data-d="-1" ${di <= 1 ? 'disabled' : ''} aria-label="前の日">‹</button>
+      <h2>${dayLabel(m, di)}</h2>
+      <button class="icon-btn" data-act="dstep" data-d="1" ${di >= n ? 'disabled' : ''} aria-label="次の日">›</button>
+    </div>
+    <p class="muted num">勤務可能 <span class="sym s-o">○</span>${r.o.length}人 <span class="sym s-p">△</span>${r.p.length}人　<span class="sym s-x">×</span>${r.x.length}人　未回答${r.n.length}人</p>
+    <label class="row muted" style="font-size:13px"><input type="checkbox" id="showNg" ${S.showNg ? 'checked' : ''}> ×の人も候補に出す</label>
+    ${slots}
+  </section>
+  <section class="card">
+    <h2>今月の勤務日数</h2>
+    <div class="list">${tally}</div>
+  </section>
+  <section class="card">
+    <h2>公開と書き出し</h2>
+    <p class="muted">公開すると、従業員の「シフト」画面に表示されます。</p>
+    <div class="row">
+      <button class="btn ${sh.published ? '' : 'primary'}" data-act="publish">${sh.published ? '公開をやめる' : '従業員に公開する'}</button>
+      <button class="btn" data-act="csv">CSVで保存</button>
+    </div>
+  </section>`;
+}
+
+function viewMy(){
+  const m = S.month, sh = getShift(m), st = settings();
+  if(!sh.published) return `<section class="card"><div class="empty"><h2>${monthInfo(m).mo}月のシフトはまだ公開されていません</h2><p>店長が公開するとここに表示されます。</p></div></section>`;
+  const {n} = monthInfo(m);
+  const mine = [];
+  let rows = '';
+  for(let i = 1; i <= n; i++){
+    const d = dk(i), day = sh.days?.[d] || {};
+    const parts = st.slots.map(sl => {
+      const ids = (day[sl.id] || []).filter(id => S.staff[id]);
+      if(S.me && ids.includes(S.me)) mine.push(`${i}日 ${sl.name}`);
+      return ids.length ? `<div><span class="muted">${esc(sl.name)}</span> ${ids.map(id => id === S.me ? `<span class="me-hl">${esc(S.staff[id].name)}</span>` : esc(S.staff[id].name)).join('・')}</div>` : '';
+    }).join('');
+    if(parts){ const w = dow(m, i); rows += `<div class="li"><b class="num" style="min-width:4.2em;color:${w === 0 ? 'var(--sun)' : w === 6 ? 'var(--sat)' : 'inherit'}">${i}日(${WD[w]})</b><div class="grow">${parts}</div></div>`; }
+  }
+  return `
+  <section class="card">
+    <h2>あなたの勤務日</h2>
+    ${S.me ? (mine.length ? `<div class="chips">${mine.map(x => `<span class="chip on">${esc(x)}</span>`).join('')}</div><p class="muted num">合計 ${new Set(mine.map(x => x.split(' ')[0])).size}日</p>` : '<p class="muted">今月の割り当てはありません。</p>') : '<p class="muted">「希望提出」で名前を選ぶと、自分の勤務日が表示されます。</p>'}
+  </section>
+  <section class="card"><h2>${monthInfo(m).mo}月のシフト</h2><div class="list">${rows || '<p class="muted">まだ割り当てがありません。</p>'}</div></section>`;
+}
+
+const appUrl = () => location.origin + location.pathname;
+function viewSet(){
+  const st = settings(), staff = staffList();
+  return `
+  <section class="card">
+    <h2>従業員に送るURL</h2>
+    <p class="muted">このURLをLINEなどで従業員に送ってください。開いて名前を選ぶだけで希望を提出できます（ログイン・インストール不要）。</p>
+    <div class="urlbox">${esc(appUrl())}</div>
+    <div><button class="btn primary" data-act="copy" data-text="${esc(appUrl())}">URLをコピー</button></div>
+  </section>
+  <section class="card">
+    <h2>お店</h2>
+    <div class="field"><label for="setStore">店名（画面の上に表示）</label><input type="text" id="setStore" data-set="store" value="${esc(st.store)}" placeholder="例）〇〇店"></div>
+    <div class="field"><label for="setDeadline">提出締切（表示用）</label><input type="text" id="setDeadline" data-set="deadline" value="${esc(st.deadline)}" placeholder="例）前月20日まで"></div>
+  </section>
+  <section class="card">
+    <h2>従業員 <span class="muted num">${staff.length}人</span></h2>
+    <div class="row" style="flex-wrap:nowrap"><input type="text" id="newStaff" placeholder="名前を入力（、で区切ると複数）" style="flex:1"><button class="btn primary" data-act="addstaff">追加</button></div>
+    <div class="list">${staff.map(s => `<div class="li"><div class="grow">${esc(s.name)}</div><button class="btn small danger" data-act="delstaff" data-id="${esc(s.id)}">${S.confirmDel === s.id ? 'もう一度押すと削除' : '削除'}</button></div>`).join('') || '<p class="muted">まだ登録されていません。</p>'}</div>
+  </section>
+  <section class="card">
+    <h2>シフト枠</h2>
+    <p class="muted">早番・遅番など1日の勤務の区切りです。必要人数はここが初期値で、日ごとにシフト作成画面で変えられます。</p>
+    ${st.slots.map((sl, i) => `<div class="slot">
+      <div class="row" style="flex-wrap:nowrap">
+        <div class="field" style="flex:1"><label for="sn${i}">名前</label><input type="text" id="sn${i}" data-slotf="name" data-i="${i}" value="${esc(sl.name)}"></div>
+        <div class="field" style="flex:1.3"><label for="stm${i}">時間</label><input type="text" id="stm${i}" data-slotf="time" data-i="${i}" value="${esc(sl.time)}" placeholder="9:00-15:00"></div>
+        <div class="field" style="width:4.2em"><label for="snd${i}">人数</label><input type="text" inputmode="numeric" id="snd${i}" data-slotf="need" data-i="${i}" value="${esc(sl.need)}"></div>
+      </div>
+      ${st.slots.length > 1 ? `<div><button class="btn small danger" data-act="delslot" data-i="${i}">${S.confirmDel === 'slot' + i ? 'もう一度押すと削除' : 'この枠を削除'}</button></div>` : ''}
+    </div>`).join('')}
+    <div><button class="btn" data-act="addslot">＋ 枠を追加</button></div>
+  </section>
+  <section class="card">
+    <h2>店長として使う端末</h2>
+    <p class="muted">この端末は店長として登録されています。別のスマホやパソコンでも店長画面を使うときは、下のURLをその端末で開いてください。<b>従業員には送らないでください。</b></p>
+    <div><button class="btn" data-act="copy" data-text="${esc(appUrl() + '?key=' + encodeURIComponent(S.key))}">店長用URLをコピー</button></div>
+    <div><button class="btn small danger" data-act="logout">${S.confirmDel === 'logout' ? 'もう一度押すと解除' : 'この端末の店長登録を解除'}</button></div>
+  </section>`;
+}
+
+const emptyStaff = () => `<section class="card"><div class="empty"><h2>従業員がまだ登録されていません</h2><p>「設定」で従業員の名前を追加すると、ここに集計が表示されます。</p><button class="btn primary" data-act="tab" data-t="set">設定を開く</button></div></section>`;
+
+/* ---------- シート・トースト ---------- */
+function openSheet(html){ $('#sheet').innerHTML = html + '<button class="btn block" data-act="close">閉じる</button>'; $('#sheetWrap').hidden = false; }
+function closeSheet(){ $('#sheetWrap').hidden = true; }
+let toastT;
+function toast(msg){ const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 2800); }
+
+function sumDaySheet(d){
+  const r = dayStats(S.month, d);
+  const grp = (k, label, list) => `<div class="field"><h3><span class="sym s-${k}">${label}</span> ${list.length}人</h3><div class="chips">${list.map(x => `<span class="chip">${esc(x.st.name)}${x.t ? ` <span class="t">${esc(x.t)}</span>` : ''}</span>`).join('') || '<span class="muted">なし</span>'}</div></div>`;
+  openSheet(`<h2>${dayLabel(S.month, Number(d))}</h2>${grp('o', '○ 出勤できる', r.o)}${grp('p', '△ 時間指定', r.p)}${grp('x', '× 出勤できない', r.x)}${grp('', '未回答', r.n)}
+    <button class="btn primary block" data-act="goshift" data-day="${d}">この日のシフトを作る</button>`);
+}
+
+/* ---------- 提出 ---------- */
+async function submit(){
+  if(!S.me){ toast('名前を選んでください'); return; }
+  if(!Object.keys(S.draft.days).length){ toast('カレンダーに○△×を入力してください'); return; }
+  if(S.sending) return;
+  S.sending = true; render();
+  try{
+    const data = await api('submit', {month:S.month, staffId:S.me, days:S.draft.days, remark:S.draft.remark});
+    S.avail[S.month + '_' + S.me] = data; clearDraft(); S.dirty = false; S.draftKey = '';
+    toast('提出しました');
+  }catch(e){ toast(saveErr(e)); }
+  S.sending = false; render();
+}
+
+function exportCsv(){
+  const m = S.month, sh = getShift(m), st = settings(), {n} = monthInfo(m);
+  const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+  const lines = [['日付', '曜日', ...st.slots.map(s => s.name + (s.time ? `(${s.time})` : ''))].map(q).join(',')];
+  for(let i = 1; i <= n; i++){
+    const day = sh.days?.[dk(i)] || {};
+    lines.push([`${m}-${dk(i)}`, WD[dow(m, i)], ...st.slots.map(sl => (day[sl.id] || []).map(id => S.staff[id]?.name).filter(Boolean).join('・'))].map(q).join(','));
+  }
+  const url = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], {type:'text/csv'}));
+  const a = document.createElement('a'); a.href = url; a.download = `shift-${m}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+async function copyText(text){
+  try{ await navigator.clipboard.writeText(text); toast('コピーしました'); }
+  catch{ openSheet(`<h2>コピーしてください</h2><textarea readonly style="font-size:13px;min-height:90px">${esc(text)}</textarea>`); }
+}
+
+/* ---------- 操作 ---------- */
+function confirmTwice(key){
+  if(S.confirmDel === key) { S.confirmDel = null; return true; }
+  S.confirmDel = key; render();
+  setTimeout(() => { if(S.confirmDel === key){ S.confirmDel = null; render(); } }, 3000);
+  return false;
+}
+document.addEventListener('click', async ev => {
+  const b = ev.target.closest('[data-act]');
+  if(!b){ if(ev.target === $('#sheetWrap')) closeSheet(); return; }
+  const a = b.dataset.act;
+  if(a === 'month'){ const [y, mo] = S.month.split('-').map(Number); S.month = ym(new Date(y, mo - 1 + Number(b.dataset.d), 1)); S.selDay = null; render(); window.scrollTo(0, 0); }
+  else if(a === 'refresh'){ await refresh(); if(!S.err) toast('最新の内容にしました'); }
+  else if(a === 'tab'){ S.tab = b.dataset.t; LS.set('sb.tab', S.tab); render(); window.scrollTo(0, 0); }
+  else if(a === 'brush'){ S.brush = b.dataset.b; render(); }
+  else if(a === 'paint'){
+    const d = b.dataset.day, cur = S.draft.days[d];
+    if(S.brush === 'c' || (cur && cur.s === S.brush && (S.brush !== 'p' || (cur.t || '') === S.partTime.trim()))) delete S.draft.days[d];
+    else S.draft.days[d] = S.brush === 'p' && S.partTime.trim() ? {s:'p', t:S.partTime.trim().slice(0, 40)} : {s:S.brush};
+    markDirty(); render();
+  }
+  else if(a === 'fill'){ const {n} = monthInfo(S.month); for(let i = 1; i <= n; i++) if(!S.draft.days[dk(i)]) S.draft.days[dk(i)] = {s:'o'}; markDirty(); render(); }
+  else if(a === 'weekend'){ const {n} = monthInfo(S.month); for(let i = 1; i <= n; i++){ const w = dow(S.month, i); if(w === 0 || w === 6) S.draft.days[dk(i)] = {s:'x'}; } markDirty(); render(); }
+  else if(a === 'clearall'){ S.draft.days = {}; markDirty(); render(); }
+  else if(a === 'submit') submit();
+  else if(a === 'copy') copyText(b.dataset.text);
+  else if(a === 'close') closeSheet();
+  else if(a === 'sumday') sumDaySheet(b.dataset.day);
+  else if(a === 'goshift'){ S.selDay = b.dataset.day; S.tab = 'shift'; LS.set('sb.tab', S.tab); closeSheet(); render(); window.scrollTo(0, 0); }
+  else if(a === 'selday'){ S.selDay = b.dataset.day; render(); }
+  else if(a === 'dstep'){ const {n} = monthInfo(S.month); S.selDay = dk(Math.min(n, Math.max(1, Number(S.selDay) + Number(b.dataset.d)))); render(); }
+  else if(a === 'need'){
+    const sl = settings().slots.find(s => s.id === b.dataset.slot); const d = S.selDay;
+    editShift(S.month, s => { const cur = Number(needFor(s, d, sl) || 0); (s.need[d] = s.need[d] || {})[sl.id] = Math.max(0, cur + Number(b.dataset.d)); });
+  }
+  else if(a === 'assign'){
+    const {slot, staff} = b.dataset, d = S.selDay;
+    editShift(S.month, s => { const day = s.days[d] = s.days[d] || {}; const arr = day[slot] = day[slot] || []; const i = arr.indexOf(staff); i >= 0 ? arr.splice(i, 1) : arr.push(staff); });
+  }
+  else if(a === 'publish'){ const p = !getShift(S.month).published; editShift(S.month, s => { s.published = p; }); toast(p ? '従業員に公開しました' : '公開をやめました'); }
+  else if(a === 'csv') exportCsv();
+  else if(a === 'addstaff'){
+    const inp = $('#newStaff'); const names = (inp.value || '').split(/[、,\n]/).map(x => x.trim()).filter(Boolean);
+    if(!names.length){ toast('名前を入力してください'); return; }
+    inp.value = '';
+    for(const [k, name] of names.entries()){
+      const id = uid('s'), sd = {name:name.slice(0, 40), active:true, order:Date.now() + k};
+      S.staff[id] = sd; render();
+      try{ await store.set('staff/' + id, sd); }catch(e){ delete S.staff[id]; toast(saveErr(e)); break; }
+    }
+    render(); setTimeout(() => $('#newStaff')?.focus(), 0);
+  }
+  else if(a === 'delstaff'){
+    const id = b.dataset.id;
+    if(!confirmTwice(id)) return;
+    const sd = {...S.staff[id], active:false}; S.staff[id] = sd; render();
+    try{ await store.set('staff/' + id, sd); toast('削除しました'); }catch(e){ toast(saveErr(e)); }
+    if(S.me === id){ S.me = ''; LS.set('sb.me', ''); }
+    render();
+  }
+  else if(a === 'addslot'){ const st = structuredClone(settings()); st.slots.push({id:uid('k'), name:'新しい枠', time:'', need:1}); saveSettings(st); }
+  else if(a === 'delslot'){
+    const i = Number(b.dataset.i);
+    if(!confirmTwice('slot' + i)) return;
+    const st = structuredClone(settings()); st.slots.splice(i, 1); saveSettings(st);
+  }
+  else if(a === 'logout'){
+    if(!confirmTwice('logout')) return;
+    S.key = ''; LS.del('sb.key'); S.isOwner = false; S.tab = 'req'; render(); refresh();
+  }
+});
+function saveSettings(st){ S.settings = st; queueWrite('settings/main', st, 300); render(); }
+
+document.addEventListener('change', ev => {
+  const t = ev.target;
+  if(t.id === 'meSel'){ S.me = t.value; LS.set('sb.me', S.me); S.draftKey = ''; S.dirty = false; t.blur(); render(); if(!S.isOwner) refresh(); }
+  else if(t.id === 'showNg'){ S.showNg = t.checked; t.blur(); render(); }
+  else if(t.dataset.set){ const st = structuredClone(settings()); st[t.dataset.set] = t.value.trim().slice(0, 60); S.settings = st; queueWrite('settings/main', st, 300); }
+  else if(t.dataset.slotf){
+    const st = structuredClone(settings()), sl = st.slots[Number(t.dataset.i)]; if(!sl) return;
+    sl[t.dataset.slotf] = t.dataset.slotf === 'need' ? Math.max(0, parseInt(t.value, 10) || 0) : t.value.trim().slice(0, 30);
+    S.settings = st; queueWrite('settings/main', st, 300);
+  }
+});
+document.addEventListener('input', ev => {
+  const t = ev.target;
+  if(t.id === 'partTime'){ S.partTime = t.value; LS.set('sb.partTime', S.partTime); }
+  else if(t.id === 'remark'){ S.draft.remark = t.value.slice(0, 500); markDirty(); }
+});
+document.addEventListener('focusout', () => setTimeout(() => { if(S.needRender) render(); }, 0));
+document.addEventListener('keydown', ev => {
+  if(ev.key === 'Escape' && !$('#sheetWrap').hidden) closeSheet();
+  if(ev.key === 'Enter' && ev.target.id === 'newStaff'){ ev.preventDefault(); document.querySelector('[data-act="addstaff"]').click(); }
+});
+
+/* ---------- 自動更新：アプリに戻ったときと、開いている間は1分ごと ---------- */
+const quiet = () => !document.hidden && !isTyping() && !inflight && !anyPending() && $('#sheetWrap').hidden;
+document.addEventListener('visibilitychange', () => { if(quiet()) refresh(); });
+setInterval(() => { if(quiet()) refresh(); }, 60000);
+
+/* ---------- 起動 ---------- */
+(function boot(){
+  const p = new URLSearchParams(location.search);
+  if(p.get('key')){
+    S.key = p.get('key').trim(); LS.set('sb.key', S.key);
+    history.replaceState(null, '', location.pathname);
+  }
+  if(!API_URL){ S.mode = 'error'; S.err = saveErr({code:'no_api'}); render(); return; }
+  render(); refresh();
+  if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+})();
+</script>
+</body>
+</html>
