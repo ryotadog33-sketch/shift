@@ -166,6 +166,24 @@ table.mx{border-collapse:separate;border-spacing:0;font-size:12px;font-variant-n
 .mx td .sym{font-size:14px}
 .mx tr.total td{font-weight:700;background:var(--bg)}
 
+/* 週の表：Excelのシフト表と同じく 名前×月〜日。マスは上に時間、下に持ち場 */
+.wk{border-collapse:separate;border-spacing:0;font-size:12px;font-variant-numeric:tabular-nums;width:100%}
+.wk th,.wk td{border-bottom:1px solid var(--line);border-right:1px solid var(--line);padding:0;text-align:center;background:var(--surface);vertical-align:middle}
+.wk th:first-child,.wk td:first-child{position:sticky;left:0;z-index:1;text-align:left;padding:4px 8px;min-width:5.6em;max-width:7em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:700}
+.wk thead th{font-weight:400;line-height:1.25}
+.wk .wh{display:flex;flex-direction:column;align-items:center;width:100%;border:0;background:none;padding:4px 2px;line-height:1.25}
+.wk .wh .c{font-size:11px;font-weight:700;border-radius:999px;padding:0 6px;margin-top:2px}
+.wk .wh .c.full{background:var(--ok-soft);color:var(--ok)} .wk .wh .c.half{background:var(--part-soft);color:var(--part)} .wk .wh .c.short{background:var(--ng-soft);color:var(--ng)}
+.wk .sun{color:var(--sun)} .wk .sat{color:var(--sat)}
+.wk .wc{display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;min-width:62px;min-height:44px;border:0;background:none;padding:3px 2px;line-height:1.25;gap:1px}
+.wk td.as{background:var(--accent-soft)} .wk td.as .t{font-weight:700;color:var(--accent)}
+.wk td.as.warn{box-shadow:inset 0 0 0 2px var(--ng)}
+.wk td.av{background:var(--ok-soft)} .wk td.av .t{color:var(--ok);font-size:11px}
+.wk td.x{background:var(--bg)} .wk td.x .t{color:var(--ng)}
+.wk td.out{background:var(--bg);opacity:.55}
+.wk .t,.wk .r{white-space:nowrap} .wk .r{font-size:11px;color:var(--ink)} .wk .bk{font-size:10px;color:var(--muted);font-weight:400}
+.wk .tot,.wk tr.total td{background:var(--bg);font-weight:700;padding:3px 6px;white-space:nowrap;font-size:11px}
+
 .list{display:flex;flex-direction:column}
 .list .li{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
 .list .li:last-child{border-bottom:0}
@@ -210,7 +228,8 @@ const WD = '日月火水木金土';
 // p＝勤務可能時間（何時〜何時）。o は以前の「出勤できる（終日）」の提出
 const SYM = {o:'○', p:'○', x:'×'};
 // 時刻は 0:00 からの分で持つ（540 = 9:00）
-const DEFAULT_SETTINGS = { store:'', deadline:'', open:540, close:1260, bands:[{s:540, e:1260, n:2}], presets:['9:00-15:00', '15:00-21:00', '9:00-21:00'] };
+const DEFAULT_SETTINGS = { store:'', deadline:'', open:540, close:1260, bands:[{s:540, e:1260, n:2}], presets:['9:00-15:00', '15:00-21:00', '9:00-21:00'],
+  roles:['レジ', '麺', '洗い場', '天ぷら', '玉取', '渡し', '高岡'] };
 const API_URL = String(window.SHIFT_API_URL || '').trim();
 
 const ym = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
@@ -225,7 +244,7 @@ const S = {
   mode:'loading', err:'', staff:{}, avail:{}, shifts:{}, settings:null,
   month:nextMonth(), tab:LS.get('sb.tab', 'req'), me:LS.get('sb.me', ''), key:LS.get('sb.key', ''),
   brush:'p', partA:LS.get('sb.partA', 540), partB:LS.get('sb.partB', 1260), lastAs:null, edit:null, draft:{days:{}, remark:''}, draftKey:'', dirty:false,
-  isOwner:false, selDay:null, showNg:false, confirmDel:null, needRender:false, sending:false
+  isOwner:false, selDay:null, wk:null, shiftMode:'week', showNg:false, confirmDel:null, needRender:false, sending:false
 };
 // 古い形式（早番・遅番）の設定にも、足りない項目は初期値を補う
 const settings = () => ({...DEFAULT_SETTINGS, ...(S.settings || {})});
@@ -346,6 +365,10 @@ function timeOpts(sel, from, to){ let h = ''; for(let t = from; t <= to; t += ST
 // カレンダーの小さいマス用（9:00-21:00 → 9-21、9:30-15:00 → 9:30-15）
 const shortR = (a, b) => [a, b].map(t => t % 60 ? fmt(t) : String(t / 60)).join('-');
 const presets = () => (settings().presets || []).map(parseRange).filter(Boolean);
+const roles = () => settings().roles || [];
+// 必要な休憩（分）：8時間以上は60分、6時間を超えたら45分
+const breakMin = (s, e) => e - s >= 480 ? 60 : e - s > 360 ? 45 : 0;
+const brkTxt = (s, e) => breakMin(s, e) ? `休${breakMin(s, e)}` : '';
 // 希望から、その日に入れる時間帯を出す（以前の○は開店〜閉店、時間の読めないものは null）
 function availRange(e){
   if(!e || e.s === 'x') return null;
@@ -355,7 +378,7 @@ function availRange(e){
   return parseRange(e.t);
 }
 
-/* ---------- シフト：days[日][従業員ID] = {s:開始, e:終了} ---------- */
+/* ---------- シフト：days[日][従業員ID] = {s:開始, e:終了, r:持ち場} ---------- */
 function getShift(m){ return S.shifts[m] || { month:m, days:{}, published:false }; }
 function editShift(m, fn){
   const s = JSON.parse(JSON.stringify(getShift(m)));
@@ -510,9 +533,93 @@ function viewSum(){
   ${remarks.length ? `<section class="card"><h2>連絡事項</h2><div class="list">${remarks.map(s => `<div class="li"><div class="grow"><b>${esc(s.name)}</b><p class="muted">${esc(availDoc(m, s.id).remark)}</p></div></div>`).join('')}</div></section>` : ''}`;
 }
 
+// 週は月曜はじまり。wk はその週の月曜の「日」（前の月にはみ出すと0以下）
+const weekStartOf = (m, i) => i - (dow(m, i) + 6) % 7;
+function weekDays(m, wk){
+  const {y, mo, n} = monthInfo(m);
+  return [...Array(7)].map((_, k) => {
+    const i = wk + k, dt = new Date(y, mo - 1, i);
+    return {i, d:dk(dt.getDate()), m:ym(dt), dn:dt.getDate(), mo:dt.getMonth() + 1, w:dt.getDay(), inM:i >= 1 && i <= n};
+  });
+}
+const hShort = min => { const h = min / 60; return (Number.isInteger(h) ? h : h.toFixed(1)) + 'h'; };
+
 function viewShift(){
+  if(!staffList().length) return emptyStaff();
+  return S.shiftMode === 'day' ? viewDay() : viewWeek();
+}
+
+// Excelのシフト表と同じ「名前×月〜日」の表
+function viewWeek(){
+  const m = S.month, staff = staffList(), sh = getShift(m), {n} = monthInfo(m);
+  if(S.wk == null) S.wk = weekStartOf(m, Math.min(n, Number(S.selDay || 1)));
+  const wd = weekDays(m, S.wk), first = wd[0], last = wd[6];
+  const wcls = x => x.w === 0 ? 'sun' : x.w === 6 ? 'sat' : '';
+  const head = wd.map(x => {
+    const lab = `<span>${x.mo}/${x.dn}</span><span>${WD[x.w]}</span>`;
+    if(!x.inM) return `<th class="${wcls(x)}"><div class="wh" style="opacity:.5">${lab}</div></th>`;
+    return `<th class="${wcls(x)}"><button class="wh ${wcls(x)}" data-act="wday" data-day="${x.d}" aria-label="${dayLabel(m, x.i)}の時間ごとの人数">${lab}<span class="c ${dayStatus(sh, x.d)}">${dayEntries(sh, x.d).length}人</span></button></th>`;
+  }).join('');
+  const dayTot = wd.map(() => ({c:0, min:0}));
+  const body = staff.map(st => {
+    let cnt = 0, min = 0;
+    const cells = wd.map((x, k) => {
+      const v = (x.inM ? sh : getShift(x.m)).days?.[x.d]?.[st.id], as = v && v.e > v.s ? v : null;
+      const e = availDoc(x.m, st.id)?.days?.[x.d], ar = availRange(e);
+      if(as){ cnt++; min += as.e - as.s; dayTot[k].c++; dayTot[k].min += as.e - as.s; }
+      const warn = as && e && (!ar || ar.s > as.s || ar.e < as.e);
+      const bk = as ? brkTxt(as.s, as.e) : '';
+      const inner = as
+        ? `<span class="t">${shortR(as.s, as.e)}</span>${as.r || bk ? `<span class="r">${esc(as.r || '')}${bk ? ` <span class="bk">${bk}</span>` : ''}</span>` : ''}`
+        : e?.s === 'x' ? '<span class="t">×</span>'
+        : e ? `<span class="t">${e.s === 'o' ? '終日' : ar ? shortR(ar.s, ar.e) : '○'}</span>` : '';
+      const cls = (as ? 'as' + (warn ? ' warn' : '') : e?.s === 'x' ? 'x' : e ? 'av' : '') + (x.inM ? '' : ' out');
+      return `<td class="${cls}">${x.inM
+        ? `<button class="wc" data-act="editas" data-staff="${esc(st.id)}" data-day="${x.d}" aria-label="${esc(st.name)} ${dayLabel(m, x.i)}">${inner}</button>`
+        : `<div class="wc">${inner}</div>`}</td>`;
+    }).join('');
+    return `<tr><td>${esc(st.name)}</td>${cells}<td class="tot">${cnt}日<br>${hShort(min)}</td></tr>`;
+  }).join('');
+  const tot = `<tr class="total"><td>合計</td>${dayTot.map(t => `<td>${t.c}人<br>${hShort(t.min)}</td>`).join('')}<td></td></tr>`;
+  return `
+  <section class="card">
+    <div class="row between"><h2>シフト作成</h2>${sh.published ? '<span class="pill ok">公開中</span>' : '<span class="pill half">下書き</span>'}</div>
+    <div class="row between" style="flex-wrap:nowrap">
+      <button class="icon-btn" data-act="wstep" data-d="-1" aria-label="前の週">‹</button>
+      <b class="num">${first.mo}/${first.dn}(月)〜${last.mo}/${last.dn}(日)</b>
+      <button class="icon-btn" data-act="wstep" data-d="1" aria-label="次の週">›</button>
+    </div>
+    <p class="muted">マスをタップして時間と持ち場を入れます。曜日をタップすると、その日の時間ごとの人数が見られます。</p>
+    <div class="legend"><span><i style="background:var(--accent-soft)"></i>決めたシフト</span><span><i style="background:var(--ok-soft)"></i>勤務可能時間</span><span><i style="box-shadow:inset 0 0 0 2px var(--ng)"></i>希望の外</span></div>
+    <div class="scroll"><table class="wk"><thead><tr><th>名前</th>${head}<th class="tot">週計</th></tr></thead><tbody>${body}${tot}</tbody></table></div>
+  </section>
+  ${shiftFooter(m, sh, staff)}`;
+}
+
+function shiftFooter(m, sh, staff){
+  const tally = staff.map(s => {
+    const doc = availDoc(m, s.id), t = staffTotals(sh, s.id);
+    const can = doc ? Object.values(doc.days || {}).filter(e => e.s !== 'x').length : null;
+    return `<div class="li"><div class="grow">${esc(s.name)}</div><span class="muted num">${can == null ? '未提出' : `入れる日 ${can}日`}</span><b class="num" style="min-width:6.5em;text-align:right">${t.days}日 ${fmtH(t.hours)}</b></div>`;
+  }).join('');
+  return `
+  <section class="card">
+    <h2>今月の勤務日数と時間</h2>
+    <div class="list">${tally}</div>
+  </section>
+  <section class="card">
+    <h2>公開と書き出し</h2>
+    <p class="muted">公開すると、従業員の「シフト」画面に表示されます。</p>
+    <div class="row">
+      <button class="btn ${sh.published ? '' : 'primary'}" data-act="publish">${sh.published ? '公開をやめる' : '従業員に公開する'}</button>
+      <button class="btn" data-act="csv">CSVで保存</button>
+    </div>
+  </section>`;
+}
+
+// 1日の画面：時間ごとの人数と、足りない時間
+function viewDay(){
   const m = S.month, staff = staffList(), sh = getShift(m);
-  if(!staff.length) return emptyStaff();
   const {n} = monthInfo(m);
   if(!S.selDay || Number(S.selDay) > n) S.selDay = '01';
   const d = S.selDay, di = Number(d), tk = ticks(), N = tk.length;
@@ -537,22 +644,15 @@ function viewShift(){
       return `<span class="${inA ? (inV || !code ? 'as' : 'as warn') : inV ? 'av' : ''}"></span>`;
     }).join('');
     const want = code === 'p' ? `○ ${e?.t || '時間の指定なし'}` : code === 'o' ? '○ 終日' : code === 'x' ? '× 出勤できない' : '未回答';
+    const bk = as ? brkTxt(as.s, as.e) : '';
+    const tm = as ? fmtR(as.s, as.e) + (as.r ? ' ' + esc(as.r) : '') + (bk ? ` <span class="muted">${bk}</span>` : '') : '未割当';
     return `<button class="srow ${as ? 'on' : ''} ${code === 'x' && !as ? 'dim' : ''}" data-act="editas" data-staff="${esc(s.id)}">
-      <span class="srow-top"><span class="nm"><span class="sym s-${code}">${code ? SYM[code] : '—'}</span> ${esc(s.name)}</span><span class="tm num">${as ? fmtR(as.s, as.e) : '未割当'}</span></span>
+      <span class="srow-top"><span class="nm"><span class="sym s-${code}">${code ? SYM[code] : '—'}</span> ${esc(s.name)}</span><span class="tm num">${tm}</span></span>
       <span class="tl" style="--n:${N}">${cells}</span>
       <span class="meta">${esc(want)}・今月${staffTotals(sh, s.id).days}日</span></button>`;
   }).join('');
-  const tally = staff.map(s => {
-    const doc = availDoc(m, s.id), t = staffTotals(sh, s.id);
-    const can = doc ? Object.values(doc.days || {}).filter(e => e.s !== 'x').length : null;
-    return `<div class="li"><div class="grow">${esc(s.name)}</div><span class="muted num">${can == null ? '未提出' : `入れる日 ${can}日`}</span><b class="num" style="min-width:6.5em;text-align:right">${t.days}日 ${fmtH(t.hours)}</b></div>`;
-  }).join('');
   return `
-  <section class="card">
-    <div class="row between"><h2>シフト作成</h2>${sh.published ? '<span class="pill ok">公開中</span>' : '<span class="pill half">下書き</span>'}</div>
-    <div class="legend"><span><i style="background:var(--ok-soft)"></i>必要人数を満たす</span><span><i style="background:var(--part-soft)"></i>足りない時間あり</span><span><i style="background:var(--ng-soft)"></i>未割り当て</span></div>
-    ${cal}
-  </section>
+  <div><button class="btn small" data-act="wback">‹ 週の表に戻る</button></div>
   <section class="card">
     <div class="row between">
       <button class="icon-btn" data-act="dstep" data-d="-1" ${di <= 1 ? 'disabled' : ''} aria-label="前の日">‹</button>
@@ -566,26 +666,24 @@ function viewShift(){
     <div class="slist">${rows || '<p class="muted">表示できる人がいません</p>'}</div>
   </section>
   <section class="card">
-    <h2>今月の勤務日数と時間</h2>
-    <div class="list">${tally}</div>
+    <div class="row between"><h2>${monthInfo(m).mo}月</h2>${sh.published ? '<span class="pill ok">公開中</span>' : '<span class="pill half">下書き</span>'}</div>
+    <div class="legend"><span><i style="background:var(--ok-soft)"></i>必要人数を満たす</span><span><i style="background:var(--part-soft)"></i>足りない時間あり</span><span><i style="background:var(--ng-soft)"></i>未割り当て</span></div>
+    ${cal}
   </section>
-  <section class="card">
-    <h2>公開と書き出し</h2>
-    <p class="muted">公開すると、従業員の「シフト」画面に表示されます。</p>
-    <div class="row">
-      <button class="btn ${sh.published ? '' : 'primary'}" data-act="publish">${sh.published ? '公開をやめる' : '従業員に公開する'}</button>
-      <button class="btn" data-act="csv">CSVで保存</button>
-    </div>
-  </section>`;
+  ${shiftFooter(m, sh, staff)}`;
 }
 
+const brkLine = (s, e) => e > s ? `勤務 ${fmtH((e - s) / 60)}・必要な休憩 ${breakMin(s, e) ? breakMin(s, e) + '分' : 'なし'}` : '終わりの時間を、始まりより後にしてください';
 function editAssignSheet(id){
   const m = S.month, d = S.selDay, sh = getShift(m), cur = sh.days?.[d]?.[id], has = cur && cur.e > cur.s;
   const e = availDoc(m, id)?.days?.[d], ar = availRange(e), {o, c} = hoursOf();
   const def = has ? cur : (e?.s === 'p' && ar) || S.lastAs || {s:o, e:c};
-  S.edit = {id, d};
+  // 持ち場は、決まっていればそれ、なければこの人が今月最後に入った持ち場
+  const r0 = has ? (cur.r || '') : (Object.keys(sh.days || {}).sort().reverse().map(k => sh.days[k][id]?.r).find(Boolean) || '');
+  S.edit = {id, d, r:r0};
   const chips = [...(e?.s === 'p' && ar ? [{label:'希望どおり ' + fmtR(ar.s, ar.e), ...ar}] : []), ...presets()]
     .map(p => `<button class="chip" data-act="preset" data-s="${p.s}" data-e="${p.e}">${esc(p.label || fmtR(p.s, p.e))}</button>`).join('');
+  const rl = [...new Set(['', ...roles(), r0])];
   openSheet(`<h2>${esc(S.staff[id].name)}　${dayLabel(m, Number(d))}</h2>
     <p class="muted">希望：${e ? (e.s === 'p' ? '○ ' + esc(e.t || '時間の指定なし') : e.s === 'o' ? '○ 終日' : '× 出勤できない') : '未回答'}</p>
     ${chips ? `<div class="chips">${chips}</div>` : ''}
@@ -594,6 +692,8 @@ function editAssignSheet(id){
       <span class="tilde">〜</span>
       <div class="field" style="flex:1"><label for="asE">終了</label><select id="asE">${timeOpts(def.e, o + STEP, c)}</select></div>
     </div>
+    <p class="muted num" id="asBrk">${brkLine(def.s, def.e)}</p>
+    ${rl.length > 1 ? `<div class="field"><h3>持ち場</h3><div class="chips" id="asRoles">${rl.map(x => `<button class="chip ${x === r0 ? 'on' : ''}" data-act="role" data-r="${esc(x)}">${x ? esc(x) : 'なし'}</button>`).join('')}</div></div>` : ''}
     <button class="btn primary block" data-act="saveas">この時間で入れる</button>
     ${has ? '<button class="btn danger block" data-act="unassign">この日のシフトから外す</button>' : ''}`);
 }
@@ -608,9 +708,9 @@ function viewMy(){
     const d = dk(i), es = dayEntries(sh, d).sort((a, b) => a[1].s - b[1].s);
     if(!es.length) continue;
     const v = S.me && sh.days[d][S.me];
-    if(v && v.e > v.s) mine.push(`${i}日(${WD[dow(m, i)]}) ${fmtR(v.s, v.e)}`);
+    if(v && v.e > v.s) mine.push(`${i}日(${WD[dow(m, i)]}) ${fmtR(v.s, v.e)}${v.r ? ' ' + v.r : ''}`);
     const w = dow(m, i);
-    rows += `<div class="li"><b class="num" style="min-width:4.2em;align-self:flex-start;color:${w === 0 ? 'var(--sun)' : w === 6 ? 'var(--sat)' : 'inherit'}">${i}日(${WD[w]})</b><div class="grow">${es.map(([id, v]) => `<div class="num">${id === S.me ? `<span class="me-hl">${esc(S.staff[id].name)}</span>` : esc(S.staff[id].name)} <span class="muted">${fmtR(v.s, v.e)}</span></div>`).join('')}</div></div>`;
+    rows += `<div class="li"><b class="num" style="min-width:4.2em;align-self:flex-start;color:${w === 0 ? 'var(--sun)' : w === 6 ? 'var(--sat)' : 'inherit'}">${i}日(${WD[w]})</b><div class="grow">${es.map(([id, v]) => `<div class="num">${id === S.me ? `<span class="me-hl">${esc(S.staff[id].name)}</span>` : esc(S.staff[id].name)} <span class="muted">${fmtR(v.s, v.e)}${v.r ? ' ' + esc(v.r) : ''}</span></div>`).join('')}</div></div>`;
   }
   const t = S.me ? staffTotals(sh, S.me) : null;
   return `
@@ -663,6 +763,11 @@ function viewSet(){
     <input type="text" id="setPresets" data-presets="1" value="${esc((st.presets || []).join('、'))}" placeholder="例）9:00-15:00、15:00-21:00、9:00-21:00">
   </section>
   <section class="card">
+    <h2>持ち場</h2>
+    <p class="muted">シフト作成で、時間と一緒に選べます。「、」で区切って入力します。</p>
+    <input type="text" id="setRoles" data-roles="1" value="${esc(roles().join('、'))}" placeholder="例）レジ、麺、洗い場、天ぷら">
+  </section>
+  <section class="card">
     <h2>店長として使う端末</h2>
     <p class="muted">この端末は店長として登録されています。別のスマホやパソコンでも店長画面を使うときは、下のURLをその端末で開いてください。<b>従業員には送らないでください。</b></p>
     <div><button class="btn" data-act="copy" data-text="${esc(appUrl() + '?key=' + encodeURIComponent(S.key))}">店長用URLをコピー</button></div>
@@ -705,7 +810,7 @@ function exportCsv(){
   const lines = [['日付', '曜日', ...staff.map(s => s.name)].map(q).join(',')];
   for(let i = 1; i <= n; i++){
     const day = sh.days?.[dk(i)] || {};
-    lines.push([`${m}-${dk(i)}`, WD[dow(m, i)], ...staff.map(s => { const v = day[s.id]; return v && v.e > v.s ? fmtR(v.s, v.e) : ''; })].map(q).join(','));
+    lines.push([`${m}-${dk(i)}`, WD[dow(m, i)], ...staff.map(s => { const v = day[s.id]; return v && v.e > v.s ? fmtR(v.s, v.e) + (v.r ? ' ' + v.r : '') : ''; })].map(q).join(','));
   }
   lines.push(['合計', '', ...staff.map(s => { const t = staffTotals(sh, s.id); return `${t.days}日 ${fmtH(t.hours)}`; })].map(q).join(','));
   const url = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], {type:'text/csv'}));
@@ -730,7 +835,7 @@ document.addEventListener('click', async ev => {
   const b = ev.target.closest('[data-act]');
   if(!b){ if(ev.target === $('#sheetWrap')) closeSheet(); return; }
   const a = b.dataset.act;
-  if(a === 'month'){ const [y, mo] = S.month.split('-').map(Number); S.month = ym(new Date(y, mo - 1 + Number(b.dataset.d), 1)); S.selDay = null; render(); window.scrollTo(0, 0); }
+  if(a === 'month'){ const [y, mo] = S.month.split('-').map(Number); S.month = ym(new Date(y, mo - 1 + Number(b.dataset.d), 1)); S.selDay = null; S.wk = null; render(); window.scrollTo(0, 0); }
   else if(a === 'refresh'){ await refresh(); if(!S.err) toast('最新の内容にしました'); }
   else if(a === 'tab'){ S.tab = b.dataset.t; LS.set('sb.tab', S.tab); render(); window.scrollTo(0, 0); }
   else if(a === 'brush'){ S.brush = b.dataset.b; render(); }
@@ -754,17 +859,29 @@ document.addEventListener('click', async ev => {
   else if(a === 'copy') copyText(b.dataset.text);
   else if(a === 'close') closeSheet();
   else if(a === 'sumday') sumDaySheet(b.dataset.day);
-  else if(a === 'goshift'){ S.selDay = b.dataset.day; S.tab = 'shift'; LS.set('sb.tab', S.tab); closeSheet(); render(); window.scrollTo(0, 0); }
+  else if(a === 'goshift'){ S.selDay = b.dataset.day; S.shiftMode = 'day'; S.tab = 'shift'; LS.set('sb.tab', S.tab); closeSheet(); render(); window.scrollTo(0, 0); }
   else if(a === 'selday'){ S.selDay = b.dataset.day; render(); }
   else if(a === 'dstep'){ const {n} = monthInfo(S.month); S.selDay = dk(Math.min(n, Math.max(1, Number(S.selDay) + Number(b.dataset.d)))); render(); }
-  else if(a === 'editas') editAssignSheet(b.dataset.staff);
-  else if(a === 'preset'){ $('#asS').value = b.dataset.s; $('#asE').value = b.dataset.e; }
+  else if(a === 'wday'){ S.selDay = b.dataset.day; S.shiftMode = 'day'; render(); window.scrollTo(0, 0); }
+  else if(a === 'wback'){ S.shiftMode = 'week'; S.wk = weekStartOf(S.month, Number(S.selDay || 1)); render(); window.scrollTo(0, 0); }
+  else if(a === 'wstep'){
+    const {n} = monthInfo(S.month), [y, mo] = S.month.split('-').map(Number);
+    let wk = (S.wk ?? 1) + 7 * Number(b.dataset.d);
+    // 週がまるごと前（次）の月に入ったら、表示する月も切り替える
+    if(wk + 6 < 1){ S.month = ym(new Date(y, mo - 2, 1)); wk += monthInfo(S.month).n; }
+    else if(wk > n){ S.month = ym(new Date(y, mo, 1)); wk -= n; }
+    S.wk = wk; S.selDay = dk(Math.min(monthInfo(S.month).n, Math.max(1, wk))); render();
+  }
+  else if(a === 'editas'){ if(b.dataset.day) S.selDay = b.dataset.day; editAssignSheet(b.dataset.staff); }
+  else if(a === 'preset'){ $('#asS').value = b.dataset.s; $('#asE').value = b.dataset.e; $('#asBrk').textContent = brkLine(Number(b.dataset.s), Number(b.dataset.e)); }
+  else if(a === 'role'){ if(S.edit) S.edit.r = b.dataset.r; document.querySelectorAll('#asRoles .chip').forEach(c => c.classList.toggle('on', c === b)); }
   else if(a === 'saveas'){
     const s = Number($('#asS').value), e = Number($('#asE').value), {id, d} = S.edit || {};
     if(!id) return;
     if(e <= s){ toast('終わりの時間を、始まりより後にしてください'); return; }
+    const r = S.edit.r || '';
     S.lastAs = {s, e}; closeSheet();
-    editShift(S.month, sh => { (sh.days[d] = sh.days[d] || {})[id] = {s, e}; });
+    editShift(S.month, sh => { (sh.days[d] = sh.days[d] || {})[id] = r ? {s, e, r} : {s, e}; });
   }
   else if(a === 'unassign'){
     const {id, d} = S.edit || {};
@@ -826,6 +943,12 @@ document.addEventListener('change', ev => {
     st.presets = t.value.split(/[、,\s]+/).map(x => x.trim()).filter(x => parseRange(x)).slice(0, 20);
     saveSettings(st);
   }
+  else if(t.dataset.roles){
+    const st = structuredClone(settings());
+    st.roles = [...new Set(t.value.split(/[、,\s]+/).map(x => x.trim().slice(0, 20)).filter(Boolean))].slice(0, 20);
+    saveSettings(st);
+  }
+  else if(t.id === 'asS' || t.id === 'asE') $('#asBrk').textContent = brkLine(Number($('#asS').value), Number($('#asE').value));
   else if(t.id === 'partA' || t.id === 'partB'){ S[t.id] = Number(t.value); LS.set('sb.' + t.id, S[t.id]); t.blur(); render(); }
 });
 document.addEventListener('input', ev => {
