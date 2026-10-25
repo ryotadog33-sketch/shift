@@ -48,6 +48,8 @@ button{cursor:pointer}
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:10px}
 .top-in{max-width:760px;margin:0 auto;display:flex;align-items:center;gap:8px}
 .brand{font-family:var(--f-display);font-weight:700;font-size:15px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.storebar{display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.storebar .chip{padding:7px 14px;font-size:14px;font-weight:700;white-space:nowrap;flex:none}
 .monthsw{display:flex;align-items:center;gap:4px}
 .monthsw b{font-family:var(--f-display);font-size:18px;min-width:6.6em;text-align:center}
 .icon-btn{width:38px;height:38px;border-radius:10px;border:1px solid var(--line);background:var(--surface);font-size:18px;line-height:1;flex:none}
@@ -244,11 +246,17 @@ const S = {
   mode:'loading', err:'', staff:{}, avail:{}, shifts:{}, settings:null,
   month:nextMonth(), tab:LS.get('sb.tab', 'req'), me:LS.get('sb.me', ''), key:LS.get('sb.key', ''),
   brush:'p', partA:LS.get('sb.partA', 540), partB:LS.get('sb.partB', 1260), lastAs:null, edit:null, draft:{days:{}, remark:''}, draftKey:'', dirty:false,
-  isOwner:false, selDay:null, wk:null, shiftMode:'week', showNg:false, confirmDel:null, needRender:false, sending:false
+  isOwner:false, store:LS.get('sb.store', 'a'), selDay:null, wk:null, shiftMode:'week', showNg:false, confirmDel:null, needRender:false, sending:false
 };
 // 古い形式（早番・遅番）の設定にも、足りない項目は初期値を補う
 const settings = () => ({...DEFAULT_SETTINGS, ...(S.settings || {})});
-const staffList = () => Object.entries(S.staff).filter(([, v]) => v && v.active !== false)
+// 店舗：最初の店舗は 'a'。従業員・希望・シフトは店舗ごと、営業時間や持ち場は全店共通
+const STORE_RE = /^[a-z0-9]{1,20}$/;
+const stores = () => { const st = settings(); return st.stores?.length ? st.stores : [{id:'a', name:st.store || ''}]; };
+const curStore = () => stores().find(x => x.id === S.store) || stores()[0];
+const storeName = x => x.name || '店舗' + (stores().indexOf(x) + 1);
+const shKey = m => S.store === 'a' ? m : m + '@' + S.store;
+const staffList = () => Object.entries(S.staff).filter(([, v]) => v && v.active !== false && (v.store || 'a') === S.store)
   .map(([id, v]) => ({id, ...v})).sort((a, b) => (a.order||0) - (b.order||0));
 const availDoc = (m, id) => S.avail[m + '_' + id];
 
@@ -309,7 +317,7 @@ function refresh(){
   $('#refreshBtn').classList.add('spin');
   loading = (async () => {
     try{
-      const d = await api('load', {staffId:S.me || ''});
+      const d = await api('load', {staffId:S.me || '', store:S.store});
       if(S.key && !d.isOwner){ S.key = ''; LS.del('sb.key'); toast('店長の合言葉が違います。従業員用の画面で開きます'); }
       S.isOwner = !!d.isOwner;
       S.staff = d.staff || {};
@@ -318,7 +326,8 @@ function refresh(){
       for(const m of Object.keys(S.shifts)) if(isPending('shifts/' + m)) sh[m] = S.shifts[m];
       S.shifts = sh;
       if(!isPending('settings/main')) S.settings = d.settings ? {...DEFAULT_SETTINGS, ...d.settings} : null;
-      if(S.me && !S.staff[S.me]){ S.me = ''; LS.set('sb.me', ''); }
+      if(S.isOwner && !stores().some(x => x.id === S.store)){ S.store = stores()[0].id; LS.set('sb.store', S.store); }
+      if(S.me && (!S.staff[S.me] || (S.staff[S.me].store || 'a') !== S.store)){ S.me = ''; LS.set('sb.me', ''); }
       S.mode = 'ready'; S.err = '';
     }catch(e){
       S.err = e && e.code === 'offline' ? '通信できません。表示は前回読み込んだ内容です' : saveErr(e);
@@ -379,12 +388,12 @@ function availRange(e){
 }
 
 /* ---------- シフト：days[日][従業員ID] = {s:開始, e:終了, r:持ち場} ---------- */
-function getShift(m){ return S.shifts[m] || { month:m, days:{}, published:false }; }
+function getShift(m){ return S.shifts[shKey(m)] || { month:m, days:{}, published:false }; }
 function editShift(m, fn){
   const s = JSON.parse(JSON.stringify(getShift(m)));
   s.days = s.days || {};
   fn(s); s.updatedAt = Date.now();
-  S.shifts[m] = s; queueWrite('shifts/' + m, s); render();
+  S.shifts[shKey(m)] = s; queueWrite('shifts/' + shKey(m), s); render();
 }
 const needAt = t => (settings().bands || []).reduce((a, b) => t >= b.s && t < b.e ? Math.max(a, Number(b.n) || 0) : a, 0);
 function dayNeed(){ return ticks().reduce((a, t) => Math.max(a, needAt(t)), 0); }
@@ -417,7 +426,7 @@ function render(){
   S.needRender = false;
   const {y, mo} = monthInfo(S.month);
   $('#monthLabel').textContent = `${y}年${mo}月`;
-  $('#brand').textContent = settings().store || 'シフト希望';
+  $('#brand').textContent = curStore().name || 'シフト希望';
   const tabs = S.isOwner
     ? [['req','○','希望提出'], ['sum','∑','集計'], ['shift','▦','シフト作成'], ['set','⚙','設定']]
     : [['req','○','希望提出'], ['my','▦','シフト']];
@@ -430,7 +439,10 @@ function render(){
   }
   const v = { req:viewReq, sum:viewSum, shift:viewShift, set:viewSet, my:viewMy }[S.tab]();
   const banner = S.err ? `<div class="banner"><span>${esc(S.err)}</span><button class="btn small" data-act="refresh">再読み込み</button></div>` : '';
-  $('#view').innerHTML = banner + v;
+  // 店長には店舗の切り替えボタンを出す（2店舗以上のとき）
+  const ss = stores();
+  const bar = S.isOwner && ss.length > 1 ? `<div class="storebar" role="group" aria-label="店舗">${ss.map(x => `<button class="chip ${x.id === S.store ? 'on' : ''}" data-act="store" data-id="${esc(x.id)}" aria-pressed="${x.id === S.store}">${esc(storeName(x))}</button>`).join('')}</div>` : '';
+  $('#view').innerHTML = banner + bar + v;
 }
 
 function calGrid(m, cellFn){
@@ -722,22 +734,28 @@ function viewMy(){
 }
 
 const appUrl = () => location.origin + location.pathname;
+const empUrl = id => appUrl() + (id === 'a' ? '' : '?s=' + id);
 function viewSet(){
   const st = settings(), staff = staffList();
   return `
   <section class="card">
-    <h2>従業員に送るURL</h2>
-    <p class="muted">このURLをLINEなどで従業員に送ってください。開いて名前を選ぶだけで希望を提出できます（ログイン・インストール不要）。</p>
-    <div class="urlbox">${esc(appUrl())}</div>
-    <div><button class="btn primary" data-act="copy" data-text="${esc(appUrl())}">URLをコピー</button></div>
+    <h2>従業員に送るURL${stores().length > 1 ? `（${esc(storeName(curStore()))}）` : ''}</h2>
+    <p class="muted">このURLをLINEなどで従業員に送ってください。開いて名前を選ぶだけで希望を提出できます（ログイン・インストール不要）。${stores().length > 1 ? '店舗ごとにURLが違います。' : ''}</p>
+    <div class="urlbox">${esc(empUrl(S.store))}</div>
+    <div><button class="btn primary" data-act="copy" data-text="${esc(empUrl(S.store))}">URLをコピー</button></div>
   </section>
   <section class="card">
-    <h2>お店</h2>
-    <div class="field"><label for="setStore">店名（画面の上に表示）</label><input type="text" id="setStore" data-set="store" value="${esc(st.store)}" placeholder="例）〇〇店"></div>
-    <div class="field"><label for="setDeadline">提出締切（表示用）</label><input type="text" id="setDeadline" data-set="deadline" value="${esc(st.deadline)}" placeholder="例）前月20日まで"></div>
+    <h2>店舗</h2>
+    <p class="muted">店舗ごとに従業員・希望・シフトが分かれます。営業時間・必要人数・持ち場は全店共通です。${stores().length > 1 ? '画面の上の店名ボタンで切り替えます。' : ''}</p>
+    ${stores().map(x => `<div class="row" style="flex-wrap:nowrap">
+      <input type="text" data-storename="${esc(x.id)}" value="${esc(x.name)}" placeholder="店名（例：アルプラザ小杉店）" aria-label="店名" style="flex:1">
+      ${stores().length > 1 ? `<button class="btn small danger" data-act="delstore" data-id="${esc(x.id)}">${S.confirmDel === 'store' + x.id ? 'もう一度押すと削除' : '削除'}</button>` : ''}
+    </div>`).join('')}
+    <div><button class="btn" data-act="addstore">＋ 店舗を追加</button></div>
+    <div class="field"><label for="setDeadline">提出締切（表示用・全店共通）</label><input type="text" id="setDeadline" data-set="deadline" value="${esc(st.deadline)}" placeholder="例）前月20日まで"></div>
   </section>
   <section class="card">
-    <h2>従業員 <span class="muted num">${staff.length}人</span></h2>
+    <h2>従業員${stores().length > 1 ? `（${esc(storeName(curStore()))}）` : ''} <span class="muted num">${staff.length}人</span></h2>
     <div class="row" style="flex-wrap:nowrap"><input type="text" id="newStaff" placeholder="名前を入力（、で区切ると複数）" style="flex:1"><button class="btn primary" data-act="addstaff">追加</button></div>
     <div class="list">${staff.map(s => `<div class="li"><div class="grow">${esc(s.name)}</div><button class="btn small danger" data-act="delstaff" data-id="${esc(s.id)}">${S.confirmDel === s.id ? 'もう一度押すと削除' : '削除'}</button></div>`).join('') || '<p class="muted">まだ登録されていません。</p>'}</div>
   </section>
@@ -814,7 +832,7 @@ function exportCsv(){
   }
   lines.push(['合計', '', ...staff.map(s => { const t = staffTotals(sh, s.id); return `${t.days}日 ${fmtH(t.hours)}`; })].map(q).join(','));
   const url = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], {type:'text/csv'}));
-  const a = document.createElement('a'); a.href = url; a.download = `shift-${m}.csv`;
+  const a = document.createElement('a'); a.href = url; a.download = `シフト_${storeName(curStore())}_${m}.csv`;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
@@ -896,7 +914,7 @@ document.addEventListener('click', async ev => {
     if(!names.length){ toast('名前を入力してください'); return; }
     inp.value = '';
     for(const [k, name] of names.entries()){
-      const id = uid('s'), sd = {name:name.slice(0, 40), active:true, order:Date.now() + k};
+      const id = uid('s'), sd = {name:name.slice(0, 40), active:true, order:Date.now() + k, store:S.store};
       S.staff[id] = sd; render();
       try{ await store.set('staff/' + id, sd); }catch(e){ delete S.staff[id]; toast(saveErr(e)); break; }
     }
@@ -916,11 +934,31 @@ document.addEventListener('click', async ev => {
     if(!confirmTwice('band' + i)) return;
     const st = structuredClone(settings()); st.bands.splice(i, 1); saveSettings(st);
   }
+  else if(a === 'store'){ switchStore(b.dataset.id); render(); window.scrollTo(0, 0); }
+  else if(a === 'addstore'){
+    const st = structuredClone(settings()), id = Math.random().toString(36).slice(2, 8);
+    st.stores = [...stores(), {id, name:''}];
+    switchStore(id); saveSettings(st);
+    setTimeout(() => $(`[data-storename="${id}"]`)?.focus(), 0);
+  }
+  else if(a === 'delstore'){
+    const id = b.dataset.id;
+    if(Object.values(S.staff).some(v => v && v.active !== false && (v.store || 'a') === id)){ toast('この店舗には従業員がいます。先に従業員を削除してください'); return; }
+    if(!confirmTwice('store' + id)) return;
+    const st = structuredClone(settings()); st.stores = stores().filter(x => x.id !== id);
+    if(S.store === id) switchStore(st.stores[0].id);
+    saveSettings(st);
+  }
   else if(a === 'logout'){
     if(!confirmTwice('logout')) return;
     S.key = ''; LS.del('sb.key'); S.isOwner = false; S.tab = 'req'; render(); refresh();
   }
 });
+function switchStore(id){
+  S.store = id; LS.set('sb.store', id); S.wk = null; S.selDay = null; S.shiftMode = 'week';
+  if(S.me && (S.staff[S.me]?.store || 'a') !== id){ S.me = ''; LS.set('sb.me', ''); }
+  S.draftKey = ''; S.dirty = false;
+}
 function saveSettings(st){ S.settings = st; queueWrite('settings/main', st, 300); render(); }
 
 document.addEventListener('change', ev => {
@@ -941,6 +979,13 @@ document.addEventListener('change', ev => {
   else if(t.dataset.presets){
     const st = structuredClone(settings());
     st.presets = t.value.split(/[、,\s]+/).map(x => x.trim()).filter(x => parseRange(x)).slice(0, 20);
+    saveSettings(st);
+  }
+  else if(t.dataset.storename){
+    const st = structuredClone(settings()), id = t.dataset.storename, name = t.value.trim().slice(0, 40);
+    st.stores = stores().map(x => x.id === id ? {...x, name} : x);
+    // 最初の店舗の名前は、これまでの「店名」にも入れておく
+    if(id === 'a') st.store = name;
     saveSettings(st);
   }
   else if(t.dataset.roles){
@@ -969,9 +1014,12 @@ setInterval(() => { if(quiet()) refresh(); }, 60000);
 /* ---------- 起動 ---------- */
 (function boot(){
   const p = new URLSearchParams(location.search);
+  // 従業員用URLの ?s= で店舗が決まる（最初の店舗は付かない）
+  if(STORE_RE.test(p.get('s') || '')){ S.store = p.get('s'); LS.set('sb.store', S.store); }
+  else if(!p.get('key') && !S.key){ S.store = 'a'; LS.set('sb.store', 'a'); }
   if(p.get('key')){
     S.key = p.get('key').trim(); LS.set('sb.key', S.key);
-    history.replaceState(null, '', location.pathname);
+    history.replaceState(null, '', location.pathname + (p.get('s') ? '?s=' + encodeURIComponent(p.get('s')) : ''));
   }
   if(!API_URL){ S.mode = 'error'; S.err = saveErr({code:'no_api'}); render(); return; }
   render(); refresh();
