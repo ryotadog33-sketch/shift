@@ -180,6 +180,8 @@ table.mx{border-collapse:separate;border-spacing:0;font-size:12px;font-variant-n
 .wk .wc{display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;min-width:62px;min-height:44px;border:0;background:none;padding:3px 2px;line-height:1.25;gap:1px}
 .wk td.as{background:var(--accent-soft)} .wk td.as .t{font-weight:700;color:var(--accent)}
 .wk td.as.warn{box-shadow:inset 0 0 0 2px var(--ng)}
+.wk td.as.help{background:var(--surface);outline:2px dashed var(--accent);outline-offset:-3px}
+.wk .from{display:block;font-size:10px;color:var(--muted);font-weight:400}
 .wk td.av{background:var(--ok-soft)} .wk td.av .t{color:var(--ok);font-size:11px}
 .wk td.x{background:var(--bg)} .wk td.x .t{color:var(--ng)}
 .wk td.out{background:var(--bg);opacity:.55}
@@ -255,7 +257,9 @@ const STORE_RE = /^[a-z0-9]{1,20}$/;
 const stores = () => { const st = settings(); return st.stores?.length ? st.stores : [{id:'a', name:st.store || ''}]; };
 const curStore = () => stores().find(x => x.id === S.store) || stores()[0];
 const storeName = x => x.name || '店舗' + (stores().indexOf(x) + 1);
-const shKey = m => S.store === 'a' ? m : m + '@' + S.store;
+const shKey = (m, st = S.store) => st === 'a' ? m : m + '@' + st;
+const stName = id => { const x = stores().find(s => s.id === id); return x ? storeName(x) : '他店'; };
+const helpName = id => stName(id) + 'ヘルプ';
 const staffList = () => Object.entries(S.staff).filter(([, v]) => v && v.active !== false && (v.store || 'a') === S.store)
   .map(([id, v]) => ({id, ...v})).sort((a, b) => (a.order||0) - (b.order||0));
 const availDoc = (m, id) => S.avail[m + '_' + id];
@@ -388,16 +392,27 @@ function availRange(e){
 }
 
 /* ---------- シフト：days[日][従業員ID] = {s:開始, e:終了, r:持ち場} ---------- */
-function getShift(m){ return S.shifts[shKey(m)] || { month:m, days:{}, published:false }; }
-function editShift(m, fn){
-  const s = JSON.parse(JSON.stringify(getShift(m)));
+function getShift(m, st = S.store){ return S.shifts[shKey(m, st)] || { month:m, days:{}, published:false }; }
+function editShift(m, fn, st = S.store){
+  const s = JSON.parse(JSON.stringify(getShift(m, st)));
   s.days = s.days || {};
   fn(s); s.updatedAt = Date.now();
-  S.shifts[shKey(m)] = s; queueWrite('shifts/' + shKey(m), s); render();
+  S.shifts[shKey(m, st)] = s; queueWrite('shifts/' + shKey(m, st), s); render();
 }
 const needAt = t => (settings().bands || []).reduce((a, b) => t >= b.s && t < b.e ? Math.max(a, Number(b.n) || 0) : a, 0);
 function dayNeed(){ return ticks().reduce((a, t) => Math.max(a, needAt(t)), 0); }
-const dayEntries = (sh, d) => Object.entries(sh.days?.[d] || {}).filter(([id, v]) => S.staff[id] && S.staff[id].active !== false && v && v.e > v.s);
+// ヘルプ（h:行き先の店舗）は元の店のシフトに保存し、行き先の店の人数に数える
+function helpIn(m, d){
+  const out = [];
+  Object.entries(S.shifts).forEach(([k, sh]) => {
+    const [km, src = 'a'] = k.split('@');
+    if(km !== m || src === S.store) return;
+    Object.entries(sh.days?.[d] || {}).forEach(([id, v]) => { if(v && v.h === S.store && v.e > v.s && S.staff[id] && S.staff[id].active !== false) out.push([id, v, src]); });
+  });
+  return out;
+}
+const dayEntries = (sh, d) => [...Object.entries(sh.days?.[d] || {}).filter(([id, v]) => S.staff[id] && S.staff[id].active !== false && v && v.e > v.s && !v.h), ...helpIn(sh.month, d)];
+const asInner = (as, lab) => { const bk = brkTxt(as.s, as.e); return `<span class="t">${shortR(as.s, as.e)}</span>${lab || bk ? `<span class="r">${esc(lab || '')}${bk ? ` <span class="bk">${bk}</span>` : ''}</span>` : ''}`; };
 function coverage(sh, d){ const es = dayEntries(sh, d); return ticks().map(t => ({t, n:es.filter(([, v]) => v.s <= t && t < v.e).length, need:needAt(t)})); }
 function dayStatus(sh, d){
   const cov = coverage(sh, d);
@@ -578,19 +593,32 @@ function viewWeek(){
     const cells = wd.map((x, k) => {
       const v = (x.inM ? sh : getShift(x.m)).days?.[x.d]?.[st.id], as = v && v.e > v.s ? v : null;
       const e = availDoc(x.m, st.id)?.days?.[x.d], ar = availRange(e);
-      if(as){ cnt++; min += as.e - as.s; dayTot[k].c++; dayTot[k].min += as.e - as.s; }
+      if(as){ cnt++; min += as.e - as.s; if(!as.h){ dayTot[k].c++; dayTot[k].min += as.e - as.s; } }
       const warn = as && e && (!ar || ar.s > as.s || ar.e < as.e);
-      const bk = as ? brkTxt(as.s, as.e) : '';
-      const inner = as
-        ? `<span class="t">${shortR(as.s, as.e)}</span>${as.r || bk ? `<span class="r">${esc(as.r || '')}${bk ? ` <span class="bk">${bk}</span>` : ''}</span>` : ''}`
+      const inner = as ? asInner(as, as.h ? helpName(as.h) : as.r)
         : e?.s === 'x' ? '<span class="t">×</span>'
         : e ? `<span class="t">${e.s === 'o' ? '終日' : ar ? shortR(ar.s, ar.e) : '○'}</span>` : '';
-      const cls = (as ? 'as' + (warn ? ' warn' : '') : e?.s === 'x' ? 'x' : e ? 'av' : '') + (x.inM ? '' : ' out');
+      const cls = (as ? 'as' + (warn ? ' warn' : '') + (as.h ? ' help' : '') : e?.s === 'x' ? 'x' : e ? 'av' : '') + (x.inM ? '' : ' out');
       return `<td class="${cls}">${x.inM
         ? `<button class="wc" data-act="editas" data-staff="${esc(st.id)}" data-day="${x.d}" aria-label="${esc(st.name)} ${dayLabel(m, x.i)}">${inner}</button>`
         : `<div class="wc">${inner}</div>`}</td>`;
     }).join('');
     return `<tr><td>${esc(st.name)}</td>${cells}<td class="tot">${cnt}日<br>${hShort(min)}</td></tr>`;
+  }).join('');
+  // 他店からのヘルプの人は、表の下に行を足す
+  const helpers = new Map();
+  wd.forEach((x, k) => helpIn(x.m, x.d).forEach(([id, v, src]) => { if(!helpers.has(id)) helpers.set(id, {src, v:[]}); helpers.get(id).v[k] = v; }));
+  const helpRows = [...helpers].map(([id, {src, v}]) => {
+    let cnt = 0, min = 0;
+    const cells = wd.map((x, k) => {
+      const as = v[k];
+      if(as){ cnt++; min += as.e - as.s; dayTot[k].c++; dayTot[k].min += as.e - as.s; }
+      const inner = as ? asInner(as, as.r) : '';
+      return `<td class="${as ? 'as' : ''}${x.inM ? '' : ' out'}">${x.inM && as
+        ? `<button class="wc" data-act="editas" data-staff="${esc(id)}" data-day="${x.d}" data-src="${esc(src)}" aria-label="${esc(S.staff[id].name)} ${dayLabel(m, x.i)}">${inner}</button>`
+        : `<div class="wc">${inner}</div>`}</td>`;
+    }).join('');
+    return `<tr><td>${esc(S.staff[id].name)}<span class="from">${esc(stName(src))}から</span></td>${cells}<td class="tot">${cnt}日<br>${hShort(min)}</td></tr>`;
   }).join('');
   const tot = `<tr class="total"><td>合計</td>${dayTot.map(t => `<td>${t.c}人<br>${hShort(t.min)}</td>`).join('')}<td></td></tr>`;
   return `
@@ -603,7 +631,7 @@ function viewWeek(){
     </div>
     <p class="muted">マスをタップして時間と持ち場を入れます。曜日をタップすると、その日の時間ごとの人数が見られます。</p>
     <div class="legend"><span><i style="background:var(--accent-soft)"></i>決めたシフト</span><span><i style="background:var(--ok-soft)"></i>勤務可能時間</span><span><i style="box-shadow:inset 0 0 0 2px var(--ng)"></i>希望の外</span></div>
-    <div class="scroll"><table class="wk"><thead><tr><th>名前</th>${head}<th class="tot">週計</th></tr></thead><tbody>${body}${tot}</tbody></table></div>
+    <div class="scroll"><table class="wk"><thead><tr><th>名前</th>${head}<th class="tot">週計</th></tr></thead><tbody>${body}${helpRows}${tot}</tbody></table></div>
   </section>
   ${shiftFooter(m, sh, staff)}`;
 }
@@ -652,16 +680,23 @@ function viewDay(){
   const rows = order.filter(({st, s}) => s !== 'x' || S.showNg || today[st.id]?.e).map(({st:s, s:code}) => {
     const e = availDoc(m, s.id)?.days?.[d], ar = availRange(e), v = today[s.id], as = v && v.e > v.s ? v : null;
     const cells = tk.map(t => {
-      const inA = as && as.s <= t && t < as.e, inV = ar && ar.s <= t && t < ar.e;
+      const inA = as && !as.h && as.s <= t && t < as.e, inV = ar && ar.s <= t && t < ar.e;
       return `<span class="${inA ? (inV || !code ? 'as' : 'as warn') : inV ? 'av' : ''}"></span>`;
     }).join('');
     const want = code === 'p' ? `○ ${e?.t || '時間の指定なし'}` : code === 'o' ? '○ 終日' : code === 'x' ? '× 出勤できない' : '未回答';
     const bk = as ? brkTxt(as.s, as.e) : '';
-    const tm = as ? fmtR(as.s, as.e) + (as.r ? ' ' + esc(as.r) : '') + (bk ? ` <span class="muted">${bk}</span>` : '') : '未割当';
+    const tm = as ? fmtR(as.s, as.e) + (as.h ? ' ' + esc(helpName(as.h)) : as.r ? ' ' + esc(as.r) : '') + (bk ? ` <span class="muted">${bk}</span>` : '') : '未割当';
     return `<button class="srow ${as ? 'on' : ''} ${code === 'x' && !as ? 'dim' : ''}" data-act="editas" data-staff="${esc(s.id)}">
       <span class="srow-top"><span class="nm"><span class="sym s-${code}">${code ? SYM[code] : '—'}</span> ${esc(s.name)}</span><span class="tm num">${tm}</span></span>
       <span class="tl" style="--n:${N}">${cells}</span>
       <span class="meta">${esc(want)}・今月${staffTotals(sh, s.id).days}日</span></button>`;
+  }).join('') + helpIn(m, d).map(([id, v, src]) => {
+    const cells = tk.map(t => `<span class="${v.s <= t && t < v.e ? 'as' : ''}"></span>`).join('');
+    const bk = brkTxt(v.s, v.e);
+    return `<button class="srow on" data-act="editas" data-staff="${esc(id)}" data-src="${esc(src)}">
+      <span class="srow-top"><span class="nm">${esc(S.staff[id].name)}</span><span class="tm num">${fmtR(v.s, v.e)}${v.r ? ' ' + esc(v.r) : ''}${bk ? ` <span class="muted">${bk}</span>` : ''}</span></span>
+      <span class="tl" style="--n:${N}">${cells}</span>
+      <span class="meta">${esc(stName(src))}からヘルプ</span></button>`;
   }).join('');
   return `
   <div><button class="btn small" data-act="wback">‹ 週の表に戻る</button></div>
@@ -686,17 +721,23 @@ function viewDay(){
 }
 
 const brkLine = (s, e) => e > s ? `勤務 ${fmtH((e - s) / 60)}・必要な休憩 ${breakMin(s, e) ? breakMin(s, e) + '分' : 'なし'}` : '終わりの時間を、始まりより後にしてください';
-function editAssignSheet(id){
-  const m = S.month, d = S.selDay, sh = getShift(m), cur = sh.days?.[d]?.[id], has = cur && cur.e > cur.s;
+// src：シフトを保存している店（他店からのヘルプの人を開いたときは元の店）
+function editAssignSheet(id, src = S.store){
+  const m = S.month, d = S.selDay, sh = getShift(m, src), cur = sh.days?.[d]?.[id], has = cur && cur.e > cur.s, away = src !== S.store;
   const e = availDoc(m, id)?.days?.[d], ar = availRange(e), {o, c} = hoursOf();
   const def = has ? cur : (e?.s === 'p' && ar) || S.lastAs || {s:o, e:c};
   // 持ち場は、決まっていればそれ、なければこの人が今月最後に入った持ち場
   const r0 = has ? (cur.r || '') : (Object.keys(sh.days || {}).sort().reverse().map(k => sh.days[k][id]?.r).find(Boolean) || '');
-  S.edit = {id, d, r:r0};
+  const h0 = has ? (cur.h || '') : '';
+  S.edit = {id, d, r:r0, h:h0, src};
   const chips = [...(e?.s === 'p' && ar ? [{label:'希望どおり ' + fmtR(ar.s, ar.e), ...ar}] : []), ...presets()]
     .map(p => `<button class="chip" data-act="preset" data-s="${p.s}" data-e="${p.e}">${esc(p.label || fmtR(p.s, p.e))}</button>`).join('');
   const rl = [...new Set(['', ...roles(), r0])];
-  openSheet(`<h2>${esc(S.staff[id].name)}　${dayLabel(m, Number(d))}</h2>
+  // 自分の店の人には、他店へのヘルプも持ち場と同じ並びで選べるようにする
+  const hl = away ? [] : stores().filter(x => x.id !== S.store);
+  const rchips = rl.map(x => `<button class="chip ${!h0 && x === r0 ? 'on' : ''}" data-act="role" data-r="${esc(x)}">${x ? esc(x) : 'なし'}</button>`).join('')
+    + hl.map(x => `<button class="chip ${h0 === x.id ? 'on' : ''}" data-act="role" data-r="" data-h="${esc(x.id)}">${esc(helpName(x.id))}</button>`).join('');
+  openSheet(`<h2>${esc(S.staff[id].name)}${away ? `（${esc(stName(src))}から）` : ''}　${dayLabel(m, Number(d))}</h2>
     <p class="muted">希望：${e ? (e.s === 'p' ? '○ ' + esc(e.t || '時間の指定なし') : e.s === 'o' ? '○ 終日' : '× 出勤できない') : '未回答'}</p>
     ${chips ? `<div class="chips">${chips}</div>` : ''}
     <div class="row" style="flex-wrap:nowrap">
@@ -705,7 +746,7 @@ function editAssignSheet(id){
       <div class="field" style="flex:1"><label for="asE">終了</label><select id="asE">${timeOpts(def.e, o + STEP, c)}</select></div>
     </div>
     <p class="muted num" id="asBrk">${brkLine(def.s, def.e)}</p>
-    ${rl.length > 1 ? `<div class="field"><h3>持ち場</h3><div class="chips" id="asRoles">${rl.map(x => `<button class="chip ${x === r0 ? 'on' : ''}" data-act="role" data-r="${esc(x)}">${x ? esc(x) : 'なし'}</button>`).join('')}</div></div>` : ''}
+    ${rl.length > 1 || hl.length ? `<div class="field"><h3>持ち場${hl.length ? '・ヘルプ' : ''}</h3><div class="chips" id="asRoles">${rchips}</div></div>` : ''}
     <button class="btn primary block" data-act="saveas">この時間で入れる</button>
     ${has ? '<button class="btn danger block" data-act="unassign">この日のシフトから外す</button>' : ''}`);
 }
@@ -718,11 +759,11 @@ function viewMy(){
   let rows = '';
   for(let i = 1; i <= n; i++){
     const d = dk(i), es = dayEntries(sh, d).sort((a, b) => a[1].s - b[1].s);
+    const v = S.me && sh.days?.[d]?.[S.me];
+    if(v && v.e > v.s) mine.push(`${i}日(${WD[dow(m, i)]}) ${fmtR(v.s, v.e)}${v.h ? ' ' + helpName(v.h) : v.r ? ' ' + v.r : ''}`);
     if(!es.length) continue;
-    const v = S.me && sh.days[d][S.me];
-    if(v && v.e > v.s) mine.push(`${i}日(${WD[dow(m, i)]}) ${fmtR(v.s, v.e)}${v.r ? ' ' + v.r : ''}`);
     const w = dow(m, i);
-    rows += `<div class="li"><b class="num" style="min-width:4.2em;align-self:flex-start;color:${w === 0 ? 'var(--sun)' : w === 6 ? 'var(--sat)' : 'inherit'}">${i}日(${WD[w]})</b><div class="grow">${es.map(([id, v]) => `<div class="num">${id === S.me ? `<span class="me-hl">${esc(S.staff[id].name)}</span>` : esc(S.staff[id].name)} <span class="muted">${fmtR(v.s, v.e)}${v.r ? ' ' + esc(v.r) : ''}</span></div>`).join('')}</div></div>`;
+    rows += `<div class="li"><b class="num" style="min-width:4.2em;align-self:flex-start;color:${w === 0 ? 'var(--sun)' : w === 6 ? 'var(--sat)' : 'inherit'}">${i}日(${WD[w]})</b><div class="grow">${es.map(([id, v]) => `<div class="num">${id === S.me ? `<span class="me-hl">${esc(S.staff[id].name)}</span>` : esc(S.staff[id].name)}${(S.staff[id].store || 'a') !== S.store ? `<span class="muted">（${esc(stName(S.staff[id].store || 'a'))}）</span>` : ''} <span class="muted">${fmtR(v.s, v.e)}${v.r ? ' ' + esc(v.r) : ''}</span></div>`).join('')}</div></div>`;
   }
   const t = S.me ? staffTotals(sh, S.me) : null;
   return `
@@ -825,12 +866,17 @@ async function submit(){
 function exportCsv(){
   const m = S.month, sh = getShift(m), staff = staffList(), {n} = monthInfo(m);
   const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
-  const lines = [['日付', '曜日', ...staff.map(s => s.name)].map(q).join(',')];
+  const help = new Map();
+  for(let i = 1; i <= n; i++) helpIn(m, dk(i)).forEach(([id, v, src]) => { if(!help.has(id)) help.set(id, {src, days:{}}); help.get(id).days[dk(i)] = v; });
+  const hp = [...help];
+  const cell = (v, lab) => v && v.e > v.s ? fmtR(v.s, v.e) + (lab ? ' ' + lab : '') : '';
+  const lines = [['日付', '曜日', ...staff.map(s => s.name), ...hp.map(([id, x]) => `${S.staff[id].name}（${stName(x.src)}）`)].map(q).join(',')];
   for(let i = 1; i <= n; i++){
     const day = sh.days?.[dk(i)] || {};
-    lines.push([`${m}-${dk(i)}`, WD[dow(m, i)], ...staff.map(s => { const v = day[s.id]; return v && v.e > v.s ? fmtR(v.s, v.e) + (v.r ? ' ' + v.r : '') : ''; })].map(q).join(','));
+    lines.push([`${m}-${dk(i)}`, WD[dow(m, i)], ...staff.map(s => { const v = day[s.id]; return cell(v, v?.h ? helpName(v.h) : v?.r); }), ...hp.map(([, x]) => cell(x.days[dk(i)], x.days[dk(i)]?.r))].map(q).join(','));
   }
-  lines.push(['合計', '', ...staff.map(s => { const t = staffTotals(sh, s.id); return `${t.days}日 ${fmtH(t.hours)}`; })].map(q).join(','));
+  lines.push(['合計', '', ...staff.map(s => { const t = staffTotals(sh, s.id); return `${t.days}日 ${fmtH(t.hours)}`; }),
+    ...hp.map(([, x]) => { const vs = Object.values(x.days); return `${vs.length}日 ${fmtH(vs.reduce((a, v) => a + v.e - v.s, 0) / 60)}`; })].map(q).join(','));
   const url = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], {type:'text/csv'}));
   const a = document.createElement('a'); a.href = url; a.download = `シフト_${storeName(curStore())}_${m}.csv`;
   document.body.appendChild(a); a.click(); a.remove();
@@ -890,22 +936,24 @@ document.addEventListener('click', async ev => {
     else if(wk > n){ S.month = ym(new Date(y, mo, 1)); wk -= n; }
     S.wk = wk; S.selDay = dk(Math.min(monthInfo(S.month).n, Math.max(1, wk))); render();
   }
-  else if(a === 'editas'){ if(b.dataset.day) S.selDay = b.dataset.day; editAssignSheet(b.dataset.staff); }
+  else if(a === 'editas'){ if(b.dataset.day) S.selDay = b.dataset.day; editAssignSheet(b.dataset.staff, b.dataset.src || S.store); }
   else if(a === 'preset'){ $('#asS').value = b.dataset.s; $('#asE').value = b.dataset.e; $('#asBrk').textContent = brkLine(Number(b.dataset.s), Number(b.dataset.e)); }
-  else if(a === 'role'){ if(S.edit) S.edit.r = b.dataset.r; document.querySelectorAll('#asRoles .chip').forEach(c => c.classList.toggle('on', c === b)); }
+  else if(a === 'role'){ if(S.edit){ S.edit.r = b.dataset.r; if(S.edit.src === S.store) S.edit.h = b.dataset.h || ''; } document.querySelectorAll('#asRoles .chip').forEach(c => c.classList.toggle('on', c === b)); }
   else if(a === 'saveas'){
     const s = Number($('#asS').value), e = Number($('#asE').value), {id, d} = S.edit || {};
     if(!id) return;
     if(e <= s){ toast('終わりの時間を、始まりより後にしてください'); return; }
-    const r = S.edit.r || '';
+    const {r, h, src} = S.edit, v = {s, e};
+    if(r) v.r = r;
+    if(h) v.h = h;
     S.lastAs = {s, e}; closeSheet();
-    editShift(S.month, sh => { (sh.days[d] = sh.days[d] || {})[id] = r ? {s, e, r} : {s, e}; });
+    editShift(S.month, sh => { (sh.days[d] = sh.days[d] || {})[id] = v; }, src);
   }
   else if(a === 'unassign'){
-    const {id, d} = S.edit || {};
+    const {id, d, src} = S.edit || {};
     if(!id) return;
     closeSheet();
-    editShift(S.month, sh => { if(sh.days[d]){ delete sh.days[d][id]; if(!Object.keys(sh.days[d]).length) delete sh.days[d]; } });
+    editShift(S.month, sh => { if(sh.days[d]){ delete sh.days[d][id]; if(!Object.keys(sh.days[d]).length) delete sh.days[d]; } }, src);
   }
   else if(a === 'publish'){ const p = !getShift(S.month).published; editShift(S.month, s => { s.published = p; }); toast(p ? '従業員に公開しました' : '公開をやめました'); }
   else if(a === 'csv') exportCsv();
