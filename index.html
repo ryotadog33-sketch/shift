@@ -219,6 +219,8 @@ table.mx{border-collapse:separate;border-spacing:0;font-size:12px;font-variant-n
   #print .from{display:block;font-size:.75em;font-weight:400}
   #print .tt{width:15mm}
   #print .sun{color:#c00} #print .sat{color:#00c}
+  #print tr{height:var(--rh)}
+  #print .ck{display:inline-block;width:1em;height:1em;border:.8pt solid #000;vertical-align:-.15em;margin-right:1mm;background:#fff}
   #print .t{font-weight:700} #print .r{font-size:.85em} #print .hp{font-style:italic}
   #print tr.total td{background:#f3f3f3;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 }
@@ -281,6 +283,9 @@ const storeName = x => x.name || '店舗' + (stores().indexOf(x) + 1);
 const shKey = (m, st = S.store) => st === 'a' ? m : m + '@' + st;
 const stName = id => { const x = stores().find(s => s.id === id); return x ? storeName(x) : '他店'; };
 const helpName = id => stName(id) + 'ヘルプ';
+// 持ち場の表示。夜の部で持ち場が変わる人は「レジ｜天ぷら」（左が昼の部、右が夜の部）
+const rolePair = v => v.r2 ? `${v.r || 'なし'}｜${v.r2}` : (v.r || '');
+const roleTxt = v => v.h ? helpName(v.h) : rolePair(v);
 const staffList = () => Object.entries(S.staff).filter(([, v]) => v && v.active !== false && (v.store || 'a') === S.store)
   .map(([id, v]) => ({id, ...v})).sort((a, b) => (a.order||0) - (b.order||0));
 const availDoc = (m, id) => S.avail[m + '_' + id];
@@ -616,7 +621,7 @@ function viewWeek(){
       const e = availDoc(x.m, st.id)?.days?.[x.d], ar = availRange(e);
       if(as){ cnt++; min += as.e - as.s; if(!as.h){ dayTot[k].c++; dayTot[k].min += as.e - as.s; } }
       const warn = as && e && (!ar || ar.s > as.s || ar.e < as.e);
-      const inner = as ? asInner(as, as.h ? helpName(as.h) : as.r)
+      const inner = as ? asInner(as, roleTxt(as))
         : e?.s === 'x' ? '<span class="t">×</span>'
         : e ? `<span class="t">${e.s === 'o' ? '終日' : ar ? shortR(ar.s, ar.e) : '○'}</span>` : '';
       const cls = (as ? 'as' + (warn ? ' warn' : '') + (as.h ? ' help' : '') : e?.s === 'x' ? 'x' : e ? 'av' : '') + (x.inM ? '' : ' out');
@@ -634,7 +639,7 @@ function viewWeek(){
     const cells = wd.map((x, k) => {
       const as = v[k];
       if(as){ cnt++; min += as.e - as.s; dayTot[k].c++; dayTot[k].min += as.e - as.s; }
-      const inner = as ? asInner(as, as.r) : '';
+      const inner = as ? asInner(as, rolePair(as)) : '';
       return `<td class="${as ? 'as' : ''}${x.inM ? '' : ' out'}">${x.inM && as
         ? `<button class="wc" data-act="editas" data-staff="${esc(id)}" data-day="${x.d}" data-src="${esc(src)}" aria-label="${esc(S.staff[id].name)} ${dayLabel(m, x.i)}">${inner}</button>`
         : `<div class="wc">${inner}</div>`}</td>`;
@@ -665,7 +670,7 @@ function printWeek(){
   const cell = (as, lab, help) => {
     if(!as) return '<td></td>';
     const bk = brkTxt(as.s, as.e);
-    return `<td><span class="t">${shortR(as.s, as.e)}</span>${lab || bk ? `<br><span class="r${help ? ' hp' : ''}">${esc(lab || '')}${bk ? ` ${bk}` : ''}</span>` : ''}</td>`;
+    return `<td><span class="ck"></span><span class="t">${shortR(as.s, as.e)}</span>${lab || bk ? `<br><span class="r${help ? ' hp' : ''}">${esc(lab || '')}${bk ? ` ${bk}` : ''}</span>` : ''}</td>`;
   };
   const dayTot = wd.map(() => 0);
   const rows = staffList().map(st => {
@@ -673,7 +678,7 @@ function printWeek(){
     const tds = wd.map((x, k) => {
       const v = getShift(x.m).days?.[x.d]?.[st.id], as = v && v.e > v.s ? v : null;
       if(as){ cnt++; min += as.e - as.s; if(!as.h) dayTot[k]++; }
-      return cell(as, as?.h ? helpName(as.h) : as?.r, as?.h);
+      return cell(as, as && roleTxt(as), as?.h);
     }).join('');
     return `<tr><td class="nm">${esc(st.name)}</td>${tds}<td>${cnt ? `${cnt}日 ${hShort(min)}` : ''}</td></tr>`;
   });
@@ -681,13 +686,15 @@ function printWeek(){
   wd.forEach((x, k) => helpIn(x.m, x.d).forEach(([id, v, src]) => { if(!helpers.has(id)) helpers.set(id, {src, v:[]}); helpers.get(id).v[k] = v; }));
   helpers.forEach(({src, v}, id) => {
     let cnt = 0, min = 0;
-    const tds = wd.map((x, k) => { const as = v[k]; if(as){ cnt++; min += as.e - as.s; dayTot[k]++; } return cell(as, as?.r); }).join('');
+    const tds = wd.map((x, k) => { const as = v[k]; if(as){ cnt++; min += as.e - as.s; dayTot[k]++; } return cell(as, as && rolePair(as)); }).join('');
     rows.push(`<tr><td class="nm">${esc(S.staff[id].name)}<span class="from">${esc(stName(src))}から</span></td>${tds}<td>${cnt}日 ${hShort(min)}</td></tr>`);
   });
-  // 1行は2段（時間・持ち場）。表に使える高さ約175mmを行数で割って文字の大きさを決める
-  const fs = Math.max(6, Math.min(10.5, Math.floor((175 / (rows.length + 2) - 1) / 0.78 * 2) / 2));
-  return `<div class="ph"><h1>${esc(storeName(curStore()))}　週間シフト　${first.mo}/${first.dn}(月)〜${last.mo}/${last.dn}(日)</h1><span class="pm">${new Date().toLocaleDateString('ja-JP')} 作成</span></div>
-    <table style="font-size:${fs}pt"><thead><tr><th class="nm">名前</th>${wd.map(x => `<th class="${wcls(x)}">${x.mo}/${x.dn}(${WD[x.w]})</th>`).join('')}<th class="tt">週計</th></tr></thead>
+  // 表に使える高さ約180mmを行数で割って、1行の高さを決める（ページの下まで使う）。
+  // 1行は2段（時間・持ち場）なので、文字の大きさは行の高さに合わせる
+  const rh = Math.min(26, 180 / (rows.length + 2));
+  const fs = Math.max(6, Math.min(11, Math.floor((rh - 1) / 0.78 * 2) / 2));
+  return `<div class="ph"><h1>${esc(storeName(curStore()))}　週間シフト　${first.mo}/${first.dn}(月)〜${last.mo}/${last.dn}(日)</h1><span class="pm"><span class="ck"></span>体調チェック：出勤したら、体調が大丈夫なら☑　${new Date().toLocaleDateString('ja-JP')} 作成</span></div>
+    <table style="font-size:${fs}pt;--rh:${rh.toFixed(2)}mm"><thead><tr><th class="nm">名前</th>${wd.map(x => `<th class="${wcls(x)}">${x.mo}/${x.dn}(${WD[x.w]})</th>`).join('')}<th class="tt">週計</th></tr></thead>
     <tbody>${rows.join('')}<tr class="total"><td class="nm">人数</td>${dayTot.map(c => `<td>${c}人</td>`).join('')}<td></td></tr></tbody></table>`;
 }
 
@@ -740,7 +747,7 @@ function viewDay(){
     }).join('');
     const want = code === 'p' ? `○ ${e?.t || '時間の指定なし'}` : code === 'o' ? '○ 終日' : code === 'x' ? '× 出勤できない' : '未回答';
     const bk = as ? brkTxt(as.s, as.e) : '';
-    const tm = as ? fmtR(as.s, as.e) + (as.h ? ' ' + esc(helpName(as.h)) : as.r ? ' ' + esc(as.r) : '') + (bk ? ` <span class="muted">${bk}</span>` : '') : '未割当';
+    const tm = as ? fmtR(as.s, as.e) + (roleTxt(as) ? ' ' + esc(roleTxt(as)) : '') + (bk ? ` <span class="muted">${bk}</span>` : '') : '未割当';
     return `<button class="srow ${as ? 'on' : ''} ${code === 'x' && !as ? 'dim' : ''}" data-act="editas" data-staff="${esc(s.id)}">
       <span class="srow-top"><span class="nm"><span class="sym s-${code}">${code ? SYM[code] : '—'}</span> ${esc(s.name)}</span><span class="tm num">${tm}</span></span>
       <span class="tl" style="--n:${N}">${cells}</span>
@@ -749,7 +756,7 @@ function viewDay(){
     const cells = tk.map(t => `<span class="${v.s <= t && t < v.e ? 'as' : ''}"></span>`).join('');
     const bk = brkTxt(v.s, v.e);
     return `<button class="srow on" data-act="editas" data-staff="${esc(id)}" data-src="${esc(src)}">
-      <span class="srow-top"><span class="nm">${esc(S.staff[id].name)}</span><span class="tm num">${fmtR(v.s, v.e)}${v.r ? ' ' + esc(v.r) : ''}${bk ? ` <span class="muted">${bk}</span>` : ''}</span></span>
+      <span class="srow-top"><span class="nm">${esc(S.staff[id].name)}</span><span class="tm num">${fmtR(v.s, v.e)}${rolePair(v) ? ' ' + esc(rolePair(v)) : ''}${bk ? ` <span class="muted">${bk}</span>` : ''}</span></span>
       <span class="tl" style="--n:${N}">${cells}</span>
       <span class="meta">${esc(stName(src))}からヘルプ</span></button>`;
   }).join('');
@@ -784,7 +791,8 @@ function editAssignSheet(id, src = S.store){
   // 持ち場は、決まっていればそれ、なければこの人が今月最後に入った持ち場
   const r0 = has ? (cur.r || '') : (Object.keys(sh.days || {}).sort().reverse().map(k => sh.days[k][id]?.r).find(Boolean) || '');
   const h0 = has ? (cur.h || '') : '';
-  S.edit = {id, d, r:r0, h:h0, src};
+  const n0 = has ? (cur.r2 || '') : '';
+  S.edit = {id, d, r:r0, h:h0, r2:n0, src};
   const chips = [...(e?.s === 'p' && ar ? [{label:'希望どおり ' + fmtR(ar.s, ar.e), ...ar}] : []), ...presets()]
     .map(p => `<button class="chip" data-act="preset" data-s="${p.s}" data-e="${p.e}">${esc(p.label || fmtR(p.s, p.e))}</button>`).join('');
   const rl = [...new Set(['', ...roles(), r0])];
@@ -801,7 +809,8 @@ function editAssignSheet(id, src = S.store){
       <div class="field" style="flex:1"><label for="asE">終了</label><select id="asE">${timeOpts(def.e, o + STEP, c)}</select></div>
     </div>
     <p class="muted num" id="asBrk">${brkLine(def.s, def.e)}</p>
-    ${rl.length > 1 || hl.length ? `<div class="field"><h3>持ち場${hl.length ? '・ヘルプ' : ''}</h3><div class="chips" id="asRoles">${rchips}</div></div>` : ''}
+    ${rl.length > 1 || hl.length ? `<div class="field"><h3>${rl.length > 1 ? '昼の部の持ち場' : '持ち場'}${hl.length ? '・ヘルプ' : ''}</h3><div class="chips" id="asRoles">${rchips}</div></div>` : ''}
+    ${rl.length > 1 ? `<div class="field"><h3>夜の部の持ち場（途中で変わるときだけ）</h3><div class="chips" id="asRoles2">${[...new Set(['', ...roles(), n0])].map(x => `<button class="chip ${x === n0 ? 'on' : ''}" data-act="role2" data-r="${esc(x)}">${x ? esc(x) : '昼と同じ'}</button>`).join('')}</div></div>` : ''}
     <button class="btn primary block" data-act="saveas">この時間で入れる</button>
     ${has ? '<button class="btn danger block" data-act="unassign">この日のシフトから外す</button>' : ''}`);
 }
@@ -815,10 +824,10 @@ function viewMy(){
   for(let i = 1; i <= n; i++){
     const d = dk(i), es = dayEntries(sh, d).sort((a, b) => a[1].s - b[1].s);
     const v = S.me && sh.days?.[d]?.[S.me];
-    if(v && v.e > v.s) mine.push(`${i}日(${WD[dow(m, i)]}) ${fmtR(v.s, v.e)}${v.h ? ' ' + helpName(v.h) : v.r ? ' ' + v.r : ''}`);
+    if(v && v.e > v.s) mine.push(`${i}日(${WD[dow(m, i)]}) ${fmtR(v.s, v.e)}${roleTxt(v) ? ' ' + roleTxt(v) : ''}`);
     if(!es.length) continue;
     const w = dow(m, i);
-    rows += `<div class="li"><b class="num" style="min-width:4.2em;align-self:flex-start;color:${w === 0 ? 'var(--sun)' : w === 6 ? 'var(--sat)' : 'inherit'}">${i}日(${WD[w]})</b><div class="grow">${es.map(([id, v]) => `<div class="num">${id === S.me ? `<span class="me-hl">${esc(S.staff[id].name)}</span>` : esc(S.staff[id].name)}${(S.staff[id].store || 'a') !== S.store ? `<span class="muted">（${esc(stName(S.staff[id].store || 'a'))}）</span>` : ''} <span class="muted">${fmtR(v.s, v.e)}${v.r ? ' ' + esc(v.r) : ''}</span></div>`).join('')}</div></div>`;
+    rows += `<div class="li"><b class="num" style="min-width:4.2em;align-self:flex-start;color:${w === 0 ? 'var(--sun)' : w === 6 ? 'var(--sat)' : 'inherit'}">${i}日(${WD[w]})</b><div class="grow">${es.map(([id, v]) => `<div class="num">${id === S.me ? `<span class="me-hl">${esc(S.staff[id].name)}</span>` : esc(S.staff[id].name)}${(S.staff[id].store || 'a') !== S.store ? `<span class="muted">（${esc(stName(S.staff[id].store || 'a'))}）</span>` : ''} <span class="muted">${fmtR(v.s, v.e)}${rolePair(v) ? ' ' + esc(rolePair(v)) : ''}</span></div>`).join('')}</div></div>`;
   }
   const t = S.me ? staffTotals(sh, S.me) : null;
   return `
@@ -928,7 +937,7 @@ function exportCsv(){
   const lines = [['日付', '曜日', ...staff.map(s => s.name), ...hp.map(([id, x]) => `${S.staff[id].name}（${stName(x.src)}）`)].map(q).join(',')];
   for(let i = 1; i <= n; i++){
     const day = sh.days?.[dk(i)] || {};
-    lines.push([`${m}-${dk(i)}`, WD[dow(m, i)], ...staff.map(s => { const v = day[s.id]; return cell(v, v?.h ? helpName(v.h) : v?.r); }), ...hp.map(([, x]) => cell(x.days[dk(i)], x.days[dk(i)]?.r))].map(q).join(','));
+    lines.push([`${m}-${dk(i)}`, WD[dow(m, i)], ...staff.map(s => { const v = day[s.id]; return cell(v, v && roleTxt(v)); }), ...hp.map(([, x]) => cell(x.days[dk(i)], x.days[dk(i)] && rolePair(x.days[dk(i)])))].map(q).join(','));
   }
   lines.push(['合計', '', ...staff.map(s => { const t = staffTotals(sh, s.id); return `${t.days}日 ${fmtH(t.hours)}`; }),
     ...hp.map(([, x]) => { const vs = Object.values(x.days); return `${vs.length}日 ${fmtH(vs.reduce((a, v) => a + v.e - v.s, 0) / 60)}`; })].map(q).join(','));
@@ -995,12 +1004,14 @@ document.addEventListener('click', async ev => {
   else if(a === 'editas'){ if(b.dataset.day) S.selDay = b.dataset.day; editAssignSheet(b.dataset.staff, b.dataset.src || S.store); }
   else if(a === 'preset'){ $('#asS').value = b.dataset.s; $('#asE').value = b.dataset.e; $('#asBrk').textContent = brkLine(Number(b.dataset.s), Number(b.dataset.e)); }
   else if(a === 'role'){ if(S.edit){ S.edit.r = b.dataset.r; if(S.edit.src === S.store) S.edit.h = b.dataset.h || ''; } document.querySelectorAll('#asRoles .chip').forEach(c => c.classList.toggle('on', c === b)); }
+  else if(a === 'role2'){ if(S.edit) S.edit.r2 = b.dataset.r; document.querySelectorAll('#asRoles2 .chip').forEach(c => c.classList.toggle('on', c === b)); }
   else if(a === 'saveas'){
     const s = Number($('#asS').value), e = Number($('#asE').value), {id, d} = S.edit || {};
     if(!id) return;
     if(e <= s){ toast('終わりの時間を、始まりより後にしてください'); return; }
-    const {r, h, src} = S.edit, v = {s, e};
+    const {r, h, r2, src} = S.edit, v = {s, e};
     if(r) v.r = r;
+    if(r2 && r2 !== r) v.r2 = r2;
     if(h) v.h = h;
     S.lastAs = {s, e}; closeSheet();
     editShift(S.month, sh => { (sh.days[d] = sh.days[d] || {})[id] = v; }, src);
