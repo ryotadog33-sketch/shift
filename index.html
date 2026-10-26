@@ -202,6 +202,26 @@ table.mx{border-collapse:separate;border-spacing:0;font-size:12px;font-variant-n
 .empty{padding:24px 8px;text-align:center;color:var(--muted);display:flex;flex-direction:column;gap:10px;align-items:center}
 @media (prefers-reduced-motion: no-preference){.btn,.cell,.brush,.chip,.cand button{transition:background-color .15s,border-color .15s}}
 @media (prefers-reduced-motion: reduce){.icon-btn.spin{animation:none;opacity:.5}}
+/* 週間シフトの印刷（A4横1枚） */
+#print{display:none}
+@media print{
+  @page{size:A4 landscape;margin:8mm}
+  body{background:#fff}
+  body>*:not(#print){display:none!important}
+  #print{display:block;color:#000;font-family:var(--f-body)}
+  #print .ph{display:flex;justify-content:space-between;align-items:baseline;margin:0 0 2mm}
+  #print h1{font-size:14pt;margin:0}
+  #print .pm{font-size:9pt}
+  #print table{width:100%;border-collapse:collapse;table-layout:fixed}
+  #print th,#print td{border:.6pt solid #000;padding:.4mm 1mm;text-align:center;vertical-align:middle;line-height:1.1;overflow:hidden}
+  #print th{background:#eee;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  #print .nm{width:26mm;text-align:left;font-weight:700;white-space:nowrap}
+  #print .from{display:block;font-size:.75em;font-weight:400}
+  #print .tt{width:15mm}
+  #print .sun{color:#c00} #print .sat{color:#00c}
+  #print .t{font-weight:700} #print .r{font-size:.85em} #print .hp{font-style:italic}
+  #print tr.total td{background:#f3f3f3;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
 </style>
 <script src="config.js"></script>
 </head>
@@ -219,6 +239,7 @@ table.mx{border-collapse:separate;border-spacing:0;font-size:12px;font-variant-n
 <nav class="tabs"><div class="tabs-in" id="tabs"></div></nav>
 <div id="sheetWrap" class="sheet-wrap" hidden><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
 <div id="toast" class="toast" hidden></div>
+<div id="print"></div>
 
 <script>
 const $ = s => document.querySelector(s);
@@ -630,10 +651,44 @@ function viewWeek(){
       <button class="icon-btn" data-act="wstep" data-d="1" aria-label="次の週">›</button>
     </div>
     <p class="muted">マスをタップして時間と持ち場を入れます。曜日をタップすると、その日の時間ごとの人数が見られます。</p>
+    <div><button class="btn" data-act="print">この週を印刷（A4横）</button></div>
     <div class="legend"><span><i style="background:var(--accent-soft)"></i>決めたシフト</span><span><i style="background:var(--ok-soft)"></i>勤務可能時間</span><span><i style="box-shadow:inset 0 0 0 2px var(--ng)"></i>希望の外</span></div>
     <div class="scroll"><table class="wk"><thead><tr><th>名前</th>${head}<th class="tot">週計</th></tr></thead><tbody>${body}${helpRows}${tot}</tbody></table></div>
   </section>
   ${shiftFooter(m, sh, staff)}`;
+}
+
+// 印刷用の週間シフト（決まったシフトだけ。人数が多いほど文字を小さくしてA4横1枚に収める）
+function printWeek(){
+  const m = S.month, wd = weekDays(m, S.wk), first = wd[0], last = wd[6];
+  const wcls = x => x.w === 0 ? 'sun' : x.w === 6 ? 'sat' : '';
+  const cell = (as, lab, help) => {
+    if(!as) return '<td></td>';
+    const bk = brkTxt(as.s, as.e);
+    return `<td><span class="t">${shortR(as.s, as.e)}</span>${lab || bk ? `<br><span class="r${help ? ' hp' : ''}">${esc(lab || '')}${bk ? ` ${bk}` : ''}</span>` : ''}</td>`;
+  };
+  const dayTot = wd.map(() => 0);
+  const rows = staffList().map(st => {
+    let cnt = 0, min = 0;
+    const tds = wd.map((x, k) => {
+      const v = getShift(x.m).days?.[x.d]?.[st.id], as = v && v.e > v.s ? v : null;
+      if(as){ cnt++; min += as.e - as.s; if(!as.h) dayTot[k]++; }
+      return cell(as, as?.h ? helpName(as.h) : as?.r, as?.h);
+    }).join('');
+    return `<tr><td class="nm">${esc(st.name)}</td>${tds}<td>${cnt ? `${cnt}日 ${hShort(min)}` : ''}</td></tr>`;
+  });
+  const helpers = new Map();
+  wd.forEach((x, k) => helpIn(x.m, x.d).forEach(([id, v, src]) => { if(!helpers.has(id)) helpers.set(id, {src, v:[]}); helpers.get(id).v[k] = v; }));
+  helpers.forEach(({src, v}, id) => {
+    let cnt = 0, min = 0;
+    const tds = wd.map((x, k) => { const as = v[k]; if(as){ cnt++; min += as.e - as.s; dayTot[k]++; } return cell(as, as?.r); }).join('');
+    rows.push(`<tr><td class="nm">${esc(S.staff[id].name)}<span class="from">${esc(stName(src))}から</span></td>${tds}<td>${cnt}日 ${hShort(min)}</td></tr>`);
+  });
+  // 1行は2段（時間・持ち場）。表に使える高さ約175mmを行数で割って文字の大きさを決める
+  const fs = Math.max(6, Math.min(10.5, Math.floor((175 / (rows.length + 2) - 1) / 0.78 * 2) / 2));
+  return `<div class="ph"><h1>${esc(storeName(curStore()))}　週間シフト　${first.mo}/${first.dn}(月)〜${last.mo}/${last.dn}(日)</h1><span class="pm">${new Date().toLocaleDateString('ja-JP')} 作成</span></div>
+    <table style="font-size:${fs}pt"><thead><tr><th class="nm">名前</th>${wd.map(x => `<th class="${wcls(x)}">${x.mo}/${x.dn}(${WD[x.w]})</th>`).join('')}<th class="tt">週計</th></tr></thead>
+    <tbody>${rows.join('')}<tr class="total"><td class="nm">人数</td>${dayTot.map(c => `<td>${c}人</td>`).join('')}<td></td></tr></tbody></table>`;
 }
 
 function shiftFooter(m, sh, staff){
@@ -928,6 +983,7 @@ document.addEventListener('click', async ev => {
   else if(a === 'dstep'){ const {n} = monthInfo(S.month); S.selDay = dk(Math.min(n, Math.max(1, Number(S.selDay) + Number(b.dataset.d)))); render(); }
   else if(a === 'wday'){ S.selDay = b.dataset.day; S.shiftMode = 'day'; render(); window.scrollTo(0, 0); }
   else if(a === 'wback'){ S.shiftMode = 'week'; S.wk = weekStartOf(S.month, Number(S.selDay || 1)); render(); window.scrollTo(0, 0); }
+  else if(a === 'print'){ $('#print').innerHTML = printWeek(); window.print(); }
   else if(a === 'wstep'){
     const {n} = monthInfo(S.month), [y, mo] = S.month.split('-').map(Number);
     let wk = (S.wk ?? 1) + 7 * Number(b.dataset.d);
