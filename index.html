@@ -203,12 +203,15 @@ table.mx{border-collapse:separate;border-spacing:0;font-size:12px;font-variant-n
 @media (prefers-reduced-motion: no-preference){.btn,.cell,.brush,.chip,.cand button{transition:background-color .15s,border-color .15s}}
 @media (prefers-reduced-motion: reduce){.icon-btn.spin{animation:none;opacity:.5}}
 /* 週間シフトの印刷（A4横1枚） */
-#print{display:none}
+/* 印刷用の週間シフト。パソコンは印刷のときだけ出す。スマホは PDF にするときだけ、画面の外に A4横（余白8mm）の大きさで出して写し取る */
+#print{display:none;color:#000;background:#fff;font-family:var(--f-body)}
+#print.pdf{display:block;position:fixed;left:0;top:0;z-index:-1;width:281mm;height:194mm;box-sizing:border-box}
 @media print{
   @page{size:A4 landscape;margin:8mm}
   body{background:#fff}
   body>*:not(#print){display:none!important}
-  #print{display:block;color:#000;font-family:var(--f-body)}
+  #print{display:block}
+}
   #print .ph{display:flex;justify-content:space-between;align-items:baseline;margin:0 0 2mm}
   #print h1{font-size:14pt;margin:0}
   #print .pm{font-size:9pt}
@@ -223,7 +226,6 @@ table.mx{border-collapse:separate;border-spacing:0;font-size:12px;font-variant-n
   #print .ck{display:inline-block;width:1em;height:1em;border:.8pt solid #000;vertical-align:-.15em;margin-right:1mm;background:#fff}
   #print .t{font-weight:700} #print .r{font-size:.85em} #print .hp{font-style:italic}
   #print tr.total td{background:#f3f3f3;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-}
 </style>
 <script src="config.js"></script>
 </head>
@@ -656,7 +658,7 @@ function viewWeek(){
       <button class="icon-btn" data-act="wstep" data-d="1" aria-label="次の週">›</button>
     </div>
     <p class="muted">マスをタップして時間と持ち場を入れます。曜日をタップすると、その日の時間ごとの人数が見られます。</p>
-    <div><button class="btn" data-act="print">この週を印刷（A4横）</button></div>
+    <div>${isPhone() ? '<button class="btn" data-act="pdf">この週をPDFにする（A4横・印刷用）</button>' : '<button class="btn" data-act="print">この週を印刷（A4横）</button>'}</div>
     <div class="legend"><span><i style="background:var(--accent-soft)"></i>決めたシフト</span><span><i style="background:var(--ok-soft)"></i>勤務可能時間</span><span><i style="box-shadow:inset 0 0 0 2px var(--ng)"></i>希望の外</span></div>
     <div class="scroll"><table class="wk"><thead><tr><th>名前</th>${head}<th class="tot">週計</th></tr></thead><tbody>${body}${helpRows}${tot}</tbody></table></div>
   </section>
@@ -696,6 +698,38 @@ function printWeek(){
   return `<div class="ph"><h1>${esc(storeName(curStore()))}　週間シフト　${first.mo}/${first.dn}(月)〜${last.mo}/${last.dn}(日)</h1><span class="pm"><span class="ck"></span>体調チェック：出勤したら、体調が大丈夫なら☑　${new Date().toLocaleDateString('ja-JP')} 作成</span></div>
     <table style="font-size:${fs}pt;--rh:${rh.toFixed(2)}mm"><thead><tr><th class="nm">名前</th>${wd.map(x => `<th class="${wcls(x)}">${x.mo}/${x.dn}(${WD[x.w]})</th>`).join('')}<th class="tt">週計</th></tr></thead>
     <tbody>${rows.join('')}<tr class="total"><td class="nm">人数</td>${dayTot.map(c => `<td>${c}人</td>`).join('')}<td></td></tr></tbody></table>`;
+}
+
+// スマホの印刷は「A4横」の指定が効かず縦に縮んで印刷されるので、A4横のPDFを作って渡す（PDFならスマホでも横向きのまま印刷できる）
+const isPhone = () => /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const loadScript = src => new Promise((ok, ng) => { if(document.querySelector(`script[src="${src}"]`)) return ok(); const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => ng(new Error('load')); document.head.appendChild(s); });
+async function makePdf(){
+  if(S.sending) return;
+  S.sending = true; toast('PDFを作っています…');
+  const box = $('#print');
+  try{
+    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
+    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+    box.innerHTML = printWeek(); box.classList.add('pdf');
+    const cv = await html2canvas(box, {scale:3, backgroundColor:'#fff', windowWidth:1200, logging:false});
+    const pdf = new jspdf.jsPDF({orientation:'landscape', unit:'mm', format:'a4'});
+    pdf.addImage(cv.toDataURL('image/jpeg', 0.92), 'JPEG', 8, 8, 281, 194);
+    const wd = weekDays(S.month, S.wk);
+    const name = `週間シフト_${storeName(curStore())}_${wd[0].mo}月${wd[0].dn}日.pdf`;
+    S.pdf = new File([pdf.output('blob')], name, {type:'application/pdf'});
+    // 共有は画面をタップした直後でないと動かないので、できあがったらもう一度押してもらう
+    openSheet(`<h2>PDFができました</h2><p class="muted">「共有・印刷」を押して、出てきたメニューの「プリント」を選んでください。A4横のまま印刷されます。</p>
+      <button class="btn primary block" data-act="pdfshare">共有・印刷</button>`);
+  }catch(e){ toast(e.message === 'load' ? 'PDFを作れませんでした。電波の良いところでもう一度押してください' : 'PDFを作れませんでした'); }
+  box.classList.remove('pdf'); S.sending = false;
+}
+async function sharePdf(){
+  const f = S.pdf;
+  if(!f) return;
+  if(navigator.canShare?.({files:[f]})){ try{ await navigator.share({files:[f]}); }catch{} return; }
+  const url = URL.createObjectURL(f), a = document.createElement('a');
+  a.href = url; a.download = f.name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
 function shiftFooter(m, sh, staff){
@@ -993,6 +1027,8 @@ document.addEventListener('click', async ev => {
   else if(a === 'wday'){ S.selDay = b.dataset.day; S.shiftMode = 'day'; render(); window.scrollTo(0, 0); }
   else if(a === 'wback'){ S.shiftMode = 'week'; S.wk = weekStartOf(S.month, Number(S.selDay || 1)); render(); window.scrollTo(0, 0); }
   else if(a === 'print'){ $('#print').innerHTML = printWeek(); window.print(); }
+  else if(a === 'pdf') makePdf();
+  else if(a === 'pdfshare') sharePdf();
   else if(a === 'wstep'){
     const {n} = monthInfo(S.month), [y, mo] = S.month.split('-').map(Number);
     let wk = (S.wk ?? 1) + 7 * Number(b.dataset.d);
