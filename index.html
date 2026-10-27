@@ -224,7 +224,7 @@ table.mx{border-collapse:separate;border-spacing:0;font-size:12px;font-variant-n
   #print .sun{color:#c00} #print .sat{color:#00c}
   #print tr{height:var(--rh)}
   #print .ck{display:inline-block;width:1em;height:1em;border:.8pt solid #000;vertical-align:-.15em;margin-right:1mm;background:#fff}
-  #print .t{font-weight:700} #print .r{font-size:.85em} #print .hp{font-style:italic}
+  #print .t{font-weight:700} #print .r{font-size:.85em} #print .hp{font-style:italic} #print .nw{white-space:nowrap}
   #print tr.total td{background:#f3f3f3;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 </style>
 <script src="config.js"></script>
@@ -285,8 +285,10 @@ const storeName = x => x.name || '店舗' + (stores().indexOf(x) + 1);
 const shKey = (m, st = S.store) => st === 'a' ? m : m + '@' + st;
 const stName = id => { const x = stores().find(s => s.id === id); return x ? storeName(x) : '他店'; };
 const helpName = id => stName(id) + 'ヘルプ';
-// 持ち場の表示。夜の部で持ち場が変わる人は「レジ｜天ぷら」（左が昼の部、右が夜の部）
-const rolePair = v => v.r2 ? `${v.r || 'なし'}｜${v.r2}` : (v.r || '');
+// 持ち場はいつも「昼の部｜夜の部」で出す（例：レジ｜天ぷら）。入っていない部と、持ち場が決まっていない部は「ー」。
+// 昼だけの人は「レジ｜ー」、夜だけの人は「ー｜天ぷら」。夜の部の持ち場は、夜だけ違うとき r2、それ以外は r と同じ。夜を「なし」にしたときは r2 に「ー」を入れる
+const splitAt = () => Number(settings().split ?? 1020);
+const rolePair = v => `${v.s < splitAt() ? (v.r || 'ー') : 'ー'}｜${v.e > splitAt() ? (v.r2 || v.r || 'ー') : 'ー'}`;
 const roleTxt = v => v.h ? helpName(v.h) : rolePair(v);
 const staffList = () => Object.entries(S.staff).filter(([, v]) => v && v.active !== false && (v.store || 'a') === S.store)
   .map(([id, v]) => ({id, ...v})).sort((a, b) => (a.order||0) - (b.order||0));
@@ -408,7 +410,8 @@ const shortR = (a, b) => [a, b].map(t => t % 60 ? fmt(t) : String(t / 60)).join(
 const presets = () => (settings().presets || []).map(parseRange).filter(Boolean);
 const roles = () => settings().roles || [];
 // 必要な休憩（分）：8時間以上は60分、6時間を超えたら45分
-const breakMin = (s, e) => e - s >= 480 ? 60 : e - s > 360 ? 45 : 0;
+// 6時間ちょうどの人は、少しでも延びると6時間を超えるので15分の休憩を書いておく
+const breakMin = (s, e) => e - s >= 480 ? 60 : e - s > 360 ? 45 : e - s === 360 ? 15 : 0;
 const brkTxt = (s, e) => breakMin(s, e) ? `休${breakMin(s, e)}` : '';
 // 希望から、その日に入れる時間帯を出す（以前の○は開店〜閉店、時間の読めないものは null）
 function availRange(e){
@@ -672,7 +675,7 @@ function printWeek(){
   const cell = (as, lab, help) => {
     if(!as) return '<td></td>';
     const bk = brkTxt(as.s, as.e);
-    return `<td><span class="ck"></span><span class="t">${shortR(as.s, as.e)}</span>${lab || bk ? `<br><span class="r${help ? ' hp' : ''}">${esc(lab || '')}${bk ? ` ${bk}` : ''}</span>` : ''}</td>`;
+    return `<td><span class="ck"></span><span class="t">${shortR(as.s, as.e)}</span>${lab || bk ? `<br><span class="r${help ? ' hp' : ''}">${esc(lab || '')}${bk ? ` <span class="nw">${bk}</span>` : ''}</span>` : ''}</td>`;
   };
   const dayTot = wd.map(() => 0);
   const rows = staffList().map(st => {
@@ -843,8 +846,8 @@ function editAssignSheet(id, src = S.store){
       <div class="field" style="flex:1"><label for="asE">終了</label><select id="asE">${timeOpts(def.e, o + STEP, c)}</select></div>
     </div>
     <p class="muted num" id="asBrk">${brkLine(def.s, def.e)}</p>
-    ${rl.length > 1 || hl.length ? `<div class="field"><h3>${rl.length > 1 ? '昼の部の持ち場' : '持ち場'}${hl.length ? '・ヘルプ' : ''}</h3><div class="chips" id="asRoles">${rchips}</div></div>` : ''}
-    ${rl.length > 1 ? `<div class="field"><h3>夜の部の持ち場（途中で変わるときだけ）</h3><div class="chips" id="asRoles2">${[...new Set(['', ...roles(), n0])].map(x => `<button class="chip ${x === n0 ? 'on' : ''}" data-act="role2" data-r="${esc(x)}">${x ? esc(x) : '昼と同じ'}</button>`).join('')}</div></div>` : ''}
+    ${rl.length > 1 || hl.length ? `<div class="field"><h3>持ち場${hl.length ? '・ヘルプ' : ''}</h3><div class="chips" id="asRoles">${rchips}</div></div>` : ''}
+    ${rl.length > 1 ? `<div class="field"><h3>夜の部の持ち場（昼と違うときだけ。「なし」は夜をーにする）</h3><div class="chips" id="asRoles2">${[...new Set(['', 'ー', ...roles(), n0])].map(x => `<button class="chip ${x === n0 ? 'on' : ''}" data-act="role2" data-r="${esc(x)}">${x === 'ー' ? 'なし' : x ? esc(x) : '昼と同じ'}</button>`).join('')}</div></div>` : ''}
     <button class="btn primary block" data-act="saveas">この時間で入れる</button>
     ${has ? '<button class="btn danger block" data-act="unassign">この日のシフトから外す</button>' : ''}`);
 }
@@ -905,6 +908,8 @@ function viewSet(){
       <span class="tilde">〜</span>
       <div class="field" style="flex:1"><label for="setClose">終わり</label><select id="setClose" data-hours="close">${timeOpts(hoursOf().c, 360, 1440)}</select></div>
     </div>
+    <div class="field"><label for="setSplit">昼の部と夜の部の境目</label><select id="setSplit" data-hours="split">${timeOpts(splitAt(), hoursOf().o + STEP, hoursOf().c - STEP)}</select></div>
+    <p class="muted">持ち場は「昼の部｜夜の部」で表示します。この時間より前に入る人は昼の部、後まで入る人は夜の部に持ち場が出ます（例：レジ｜ー、ー｜天ぷら）。</p>
     <p class="muted">時間帯ごとに、最低何人いてほしいかを決めます。シフト作成で足りない時間が赤く表示されます（例：11:00-14:00 は3人）。</p>
     ${(st.bands || []).map((b, i) => `<div class="row" style="flex-wrap:nowrap;align-items:flex-end">
       <div class="field" style="flex:1"><label for="bs${i}">から</label><select id="bs${i}" data-band="s" data-i="${i}">${timeOpts(b.s, hoursOf().o, hoursOf().c - STEP)}</select></div>
