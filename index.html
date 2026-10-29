@@ -68,6 +68,8 @@ main{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:16px;
 .tab{flex:1;border:0;background:none;border-radius:10px;padding:6px 4px;display:flex;flex-direction:column;align-items:center;gap:2px;color:var(--muted);font-size:12px}
 .tab .g{font-family:var(--f-display);font-size:19px;line-height:1.2}
 .tab[aria-current="page"]{color:var(--accent);background:var(--accent-soft)}
+.tab{position:relative} .tab .badge{position:absolute;top:2px;left:calc(50% + 8px);min-width:17px;height:17px;padding:0 4px;border-radius:999px;background:var(--ng);color:#fff;font-size:11px;font-weight:700;line-height:17px;text-align:center}
+.buyrow .grow{min-width:0} .buyrow b{display:block;overflow-wrap:anywhere} .buyrow .muted{font-size:12px;overflow-wrap:anywhere}
 
 .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
 h2{font-family:var(--f-display);font-size:17px;margin:0;text-wrap:balance}
@@ -273,7 +275,8 @@ const S = {
   mode:'loading', err:'', staff:{}, avail:{}, shifts:{}, settings:null,
   month:nextMonth(), tab:LS.get('sb.tab', 'req'), me:LS.get('sb.me', ''), key:LS.get('sb.key', ''),
   brush:'p', partA:LS.get('sb.partA', 540), partB:LS.get('sb.partB', 1260), lastAs:null, edit:null, draft:{days:{}, remark:''}, draftKey:'', dirty:false,
-  isOwner:false, store:LS.get('sb.store', 'a'), selDay:null, wk:null, shiftMode:'week', showNg:false, confirmDel:null, needRender:false, sending:false
+  isOwner:false, store:LS.get('sb.store', 'a'), selDay:null, wk:null, shiftMode:'week', showNg:false, confirmDel:null, needRender:false, sending:false,
+  buy:{}, buyDraft:{text:'', note:''}
 };
 // 古い形式（早番・遅番）の設定にも、足りない項目は初期値を補う
 const settings = () => ({...DEFAULT_SETTINGS, ...(S.settings || {})});
@@ -316,6 +319,8 @@ function saveErr(e){
   if(c === 'unknown_staff') return 'この名前は登録されていません。店長に確認してください';
   if(c === 'not_setup') return '受付窓口の準備（setup）がまだ終わっていません';
   if(c === 'no_api') return 'config.js に受付窓口のURLが書かれていません';
+  if(c === 'bad_text') return '品名を書いてください';
+  if(c === 'too_many') return 'お願いが100件あります。買った分を消してから追加してください';
   return '保存できませんでした。もう一度お試しください';
 }
 const store = {
@@ -356,6 +361,7 @@ function refresh(){
       S.isOwner = !!d.isOwner;
       S.staff = d.staff || {};
       S.avail = d.avail || {};
+      S.buy = d.buy || {};
       const sh = {...(d.shifts || {})};
       for(const m of Object.keys(S.shifts)) if(isPending('shifts/' + m)) sh[m] = S.shifts[m];
       S.shifts = sh;
@@ -474,16 +480,18 @@ function render(){
   $('#monthLabel').textContent = `${y}年${mo}月`;
   $('#brand').textContent = curStore().name || 'シフト希望';
   const tabs = S.isOwner
-    ? [['req','○','希望提出'], ['sum','∑','集計'], ['shift','▦','シフト作成'], ['set','⚙','設定']]
-    : [['req','○','希望提出'], ['my','▦','シフト']];
+    ? [['req','○','希望提出'], ['sum','∑','集計'], ['shift','▦','シフト作成'], ['buy','✓','買い物'], ['set','⚙','設定']]
+    : [['req','○','希望提出'], ['my','▦','シフト'], ['buy','✓','お願い']];
   if(!tabs.some(t => t[0] === S.tab)) S.tab = 'req';
-  $('#tabs').innerHTML = tabs.map(([k, g, l]) => `<button class="tab" data-act="tab" data-t="${k}" ${S.tab === k ? 'aria-current="page"' : ''}><span class="g">${g}</span>${l}</button>`).join('');
+  // 店長には、まだ買っていないお願いの件数をタブに出す
+  const nBuy = S.isOwner && S.mode === 'ready' ? buyList().length : 0;
+  $('#tabs').innerHTML = tabs.map(([k, g, l]) => `<button class="tab" data-act="tab" data-t="${k}" ${S.tab === k ? 'aria-current="page"' : ''}><span class="g">${g}</span>${l}${k === 'buy' && nBuy ? `<span class="badge num" aria-label="${nBuy}件">${nBuy}</span>` : ''}</button>`).join('');
   if(S.mode === 'loading'){ $('#view').innerHTML = '<div class="empty">読み込み中…</div>'; return; }
   if(S.mode === 'error'){
     $('#view').innerHTML = `<section class="card"><div class="empty"><h2>読み込めませんでした</h2><p>${esc(S.err)}</p><button class="btn primary" data-act="refresh">もう一度読み込む</button></div></section>`;
     return;
   }
-  const v = { req:viewReq, sum:viewSum, shift:viewShift, set:viewSet, my:viewMy }[S.tab]();
+  const v = { req:viewReq, sum:viewSum, shift:viewShift, set:viewSet, my:viewMy, buy:viewBuy }[S.tab]();
   const banner = S.err ? `<div class="banner"><span>${esc(S.err)}</span><button class="btn small" data-act="refresh">再読み込み</button></div>` : '';
   // 店長には店舗の切り替えボタンを出す（2店舗以上のとき）
   const ss = stores();
@@ -875,6 +883,53 @@ function viewMy(){
   <section class="card"><h2>${monthInfo(m).mo}月のシフト</h2><div class="list">${rows || '<p class="muted">まだ割り当てがありません。</p>'}</div></section>`;
 }
 
+/* ---------- 買い物のお願い：従業員が頼み、店長が買ったら消す ---------- */
+const buyList = () => Object.entries(S.buy).filter(([, b]) => b && b.store === S.store).map(([id, b]) => ({id, ...b})).sort((a, b) => b.at - a.at);
+const buyName = id => id === 'owner' ? '店長' : S.staff[id]?.name || '（削除された人）';
+const buyWho = () => S.isOwner ? 'owner' : S.me;
+function viewBuy(){
+  const list = buyList(), staff = staffList(), who = buyWho();
+  const when = t => new Date(t).toLocaleString('ja-JP', {month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit'});
+  const me = S.isOwner ? '' : `<div class="field"><label for="meSel">あなたの名前</label>
+    <select id="meSel"><option value="">— 選んでください —</option>${staff.map(s => `<option value="${esc(s.id)}" ${s.id === S.me ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></div>`;
+  const form = who ? `
+    <div class="field"><label for="buyText">品名</label><input id="buyText" maxlength="40" placeholder="例）牛乳、ゴミ袋、レシートの紙" value="${esc(S.buyDraft.text)}"></div>
+    <div class="field"><label for="buyNote">数・メモ（任意）</label><input id="buyNote" maxlength="60" placeholder="例）2本／いつもの銘柄／明日までに" value="${esc(S.buyDraft.note)}"></div>
+    <button class="btn primary block" data-act="buyadd" ${S.sending ? 'disabled' : ''}>${S.sending ? '送信中…' : 'お願いする'}</button>`
+    : '<p class="muted">名前を選ぶと、お願いを書けます。</p>';
+  const rows = list.map(b => `<div class="li buyrow"><div class="grow"><b>${esc(b.text)}</b>
+      ${b.note ? `<div class="muted">${esc(b.note)}</div>` : ''}<div class="muted num">${esc(buyName(b.staffId))}・${when(b.at)}</div></div>
+      ${S.isOwner ? `<button class="btn small primary" data-act="buydone" data-id="${esc(b.id)}">買った</button>`
+        : b.staffId === S.me ? `<button class="btn small" data-act="buydone" data-id="${esc(b.id)}">取り消す</button>` : ''}</div>`).join('');
+  return `
+  <section class="card">
+    <h2>${S.isOwner ? '買い物・持ってくる物を書き足す' : '店長へのお願い（買ってきてほしい物・持ってきてほしい物）'}</h2>
+    ${me}${form}
+  </section>
+  <section class="card">
+    <div class="row between"><h2>お願いの一覧</h2>${list.length ? `<span class="pill short num">${list.length}件</span>` : ''}</div>
+    ${S.isOwner ? '<p class="muted">買ったら「買った」を押すと一覧から消えます。</p>' : '<p class="muted">同じ物がすでに頼まれていないか確かめてから書いてください。</p>'}
+    <div class="list">${rows || '<p class="muted">お願いはまだありません。</p>'}</div>
+  </section>`;
+}
+async function addBuy(){
+  const text = S.buyDraft.text.trim(), note = S.buyDraft.note.trim(), staffId = buyWho();
+  if(!staffId) return;
+  if(!text){ toast('品名を書いてください'); $('#buyText')?.focus(); return; }
+  S.sending = true; render();
+  try{
+    const r = await api('addBuy', {store:S.store, staffId, text, note});
+    S.buy[r.id] = r.data; S.buyDraft = {text:'', note:''}; toast('お願いを送りました');
+  }catch(e){ toast(saveErr(e)); }
+  S.sending = false; render();
+}
+async function doneBuy(id){
+  const b = S.buy[id]; if(!b) return;
+  delete S.buy[id]; render();
+  try{ await api('doneBuy', {id, staffId:buyWho()}); toast(S.isOwner ? '一覧から消しました' : '取り消しました'); }
+  catch(e){ S.buy[id] = b; render(); toast(saveErr(e)); }
+}
+
 const appUrl = () => location.origin + location.pathname;
 const empUrl = id => appUrl() + (id === 'a' ? '' : '?s=' + id);
 function viewSet(){
@@ -1065,6 +1120,8 @@ document.addEventListener('click', async ev => {
   }
   else if(a === 'publish'){ const p = !getShift(S.month).published; editShift(S.month, s => { s.published = p; }); toast(p ? '従業員に公開しました' : '公開をやめました'); }
   else if(a === 'csv') exportCsv();
+  else if(a === 'buyadd') addBuy();
+  else if(a === 'buydone') doneBuy(b.dataset.id);
   else if(a === 'addstaff'){
     const inp = $('#newStaff'); const names = (inp.value || '').split(/[、,\n]/).map(x => x.trim()).filter(Boolean);
     if(!names.length){ toast('名前を入力してください'); return; }
@@ -1155,6 +1212,8 @@ document.addEventListener('change', ev => {
 document.addEventListener('input', ev => {
   const t = ev.target;
   if(t.id === 'remark'){ S.draft.remark = t.value.slice(0, 500); markDirty(); }
+  else if(t.id === 'buyText') S.buyDraft.text = t.value.slice(0, 40);
+  else if(t.id === 'buyNote') S.buyDraft.note = t.value.slice(0, 60);
 });
 document.addEventListener('focusout', () => setTimeout(() => { if(S.needRender) render(); }, 0));
 document.addEventListener('keydown', ev => {
