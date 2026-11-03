@@ -374,7 +374,7 @@ function refresh(){
       for(const m of Object.keys(S.shifts)) if(isPending('shifts/' + m)) sh[m] = S.shifts[m];
       S.shifts = sh;
       if(!isPending('settings/main')) S.settings = d.settings ? {...DEFAULT_SETTINGS, ...d.settings} : null;
-      if(S.isOwner && !stores().some(x => x.id === S.store)){ S.store = stores()[0].id; LS.set('sb.store', S.store); }
+      if((S.isOwner || S.settings) && !stores().some(x => x.id === S.store)){ S.store = stores()[0].id; LS.set('sb.store', S.store); }
       if(S.me && (!S.staff[S.me] || (S.staff[S.me].store || 'a') !== S.store)){ S.me = ''; LS.set('sb.me', ''); }
       S.mode = 'ready'; S.err = '';
     }catch(e){
@@ -1318,9 +1318,8 @@ setInterval(() => { if(quiet()) refresh(); }, 60000);
 /* ---------- 起動 ---------- */
 (function boot(){
   const p = new URLSearchParams(location.search);
-  // 従業員用URLの ?s= で店舗が決まる（最初の店舗は付かない）
+  // 従業員用URLの ?s= で店舗が決まる（最初の店舗は付かない）。付かないときは前に開いた店舗のまま
   if(STORE_RE.test(p.get('s') || '')){ S.store = p.get('s'); LS.set('sb.store', S.store); }
-  else if(!p.get('key') && !S.key){ S.store = 'a'; LS.set('sb.store', 'a'); }
   if(p.get('key')){
     S.key = p.get('key').trim(); LS.set('sb.key', S.key);
     history.replaceState(null, '', location.pathname + (p.get('s') ? '?s=' + encodeURIComponent(p.get('s')) : ''));
