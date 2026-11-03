@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>シフト希望</title>
+<title>こがねノート</title>
+<meta name="apple-mobile-web-app-title" content="こがねノート">
 <meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#171F32" media="(prefers-color-scheme: dark)">
 <link rel="manifest" href="manifest.webmanifest">
@@ -251,7 +252,7 @@ table.mx{border-collapse:separate;border-spacing:0;font-size:12px;font-variant-n
 </head>
 <body>
 <header class="top"><div class="top-in">
-  <div class="brand" id="brand">シフト希望</div>
+  <div class="brand" id="brand">こがねノート</div>
   <div class="monthsw">
     <button class="icon-btn" data-act="month" data-d="-1" aria-label="前の月">‹</button>
     <b id="monthLabel" class="num"></b>
@@ -504,7 +505,7 @@ function render(){
   S.needRender = false;
   const {y, mo} = monthInfo(S.month);
   $('#monthLabel').textContent = `${y}年${mo}月`;
-  $('#brand').textContent = curStore().name || 'シフト希望';
+  $('#brand').textContent = curStore().name || 'こがねノート';
   const tabs = S.isOwner
     ? [['req','○','希望提出'], ['sum','∑','集計'], ['shift','▦','シフト作成'], ['buy','✓','買い物'], ['leave','◇','有給'], ['clean','□','清掃'], ['set','⚙','設定']]
     : [['req','○','希望提出'], ['my','▦','シフト'], ['buy','✓','お願い'], ['leave','◇','有給'], ['clean','□','清掃']];

@@ -1,7 +1,7 @@
 {
-  "name": "シフト希望",
-  "short_name": "シフト",
-  "description": "シフト希望の提出・集計・シフト作成",
+  "name": "こがねノート",
+  "short_name": "こがねノート",
+  "description": "お店のシフト・お願い・有給・清掃をみんなで共有するノート",
   "lang": "ja",
   "scope": "./",
   "display": "standalone",
