@@ -470,15 +470,18 @@ function weekKey(m, d){
   t.setUTCDate(t.getUTCDate() - (t.getUTCDay() + 6) % 7);
   return t.toISOString().slice(0, 10);
 }
-const isPubAny = sh => !!(sh.published || sh.weeks?.length);
-const isPubDay = (sh, m, d) => !!(sh.published || sh.weeks?.includes(weekKey(m, d)));
 const monthWeeks = m => [...new Set([...Array(monthInfo(m).n)].map((_, i) => weekKey(m, i + 1)))];
+// 前の版の published（月まるごと公開）は、今週までを公開とみなす（来週から先は作成途中のことがあるため）
+const thisWeek = () => { const t = new Date(); return weekKey(ym(t), t.getDate()); };
+const pubWeeks = (sh, m) => sh.published ? monthWeeks(m).filter(w => w <= thisWeek()) : sh.weeks || [];
+const isPubAny = (sh, m) => pubWeeks(sh, m).length > 0;
+const isPubDay = (sh, m, d) => pubWeeks(sh, m).includes(weekKey(m, d));
 const weekPub = wd => { const x = wd.find(x => x.inM) || wd[0]; return isPubDay(getShift(x.m), x.m, x.d); };
 // 週の公開・取り消し。月をまたぐ週は、両方の月に付ける
 function toggleWeek(wd){
   const p = !weekPub(wd), key = weekKey(wd[0].m, wd[0].d);
   [...new Set(wd.map(x => x.m))].forEach(mm => editShift(mm, s => {
-    if(s.published){ s.weeks = monthWeeks(mm); s.published = false; }
+    if(s.published){ s.weeks = pubWeeks(s, mm); s.published = false; }
     const w = new Set(s.weeks || []);
     p ? w.add(key) : w.delete(key);
     s.weeks = [...w].sort();
@@ -827,7 +830,7 @@ function shiftFooter(m, sh, staff){
   <section class="card">
     <h2>公開と書き出し</h2>
     <p class="muted">公開は1週間ずつです。週の表の上の「この週を従業員に公開する」を押すと、その週だけが従業員の「シフト」画面に出ます。</p>
-    <p class="num">${sh.published ? '今月はまとめて公開中です（前の版で公開）' : sh.weeks?.length ? '公開中の週：' + sh.weeks.map(wkRange).join('、') : 'まだ公開している週はありません'}</p>
+    <p class="num">${isPubAny(sh, m) ? '公開中の週：' + pubWeeks(sh, m).map(wkRange).join('、') : 'まだ公開している週はありません'}</p>
     <div class="row">
       <button class="btn" data-act="csv">CSVで保存</button>
     </div>
@@ -932,7 +935,7 @@ function editAssignSheet(id, src = S.store){
 
 function viewMy(){
   const m = S.month, sh = getShift(m);
-  if(!isPubAny(sh)) return `<section class="card"><div class="empty"><h2>${monthInfo(m).mo}月のシフトはまだ公開されていません</h2><p>店長が公開するとここに表示されます。</p></div></section>`;
+  if(!isPubAny(sh, m)) return `<section class="card"><div class="empty"><h2>${monthInfo(m).mo}月のシフトはまだ公開されていません</h2><p>店長が公開するとここに表示されます。</p></div></section>`;
   const {n} = monthInfo(m);
   const mine = [];
   let rows = '';
@@ -950,7 +953,7 @@ function viewMy(){
     <h2>あなたの勤務日</h2>
     ${S.me ? (mine.length ? `<div class="chips">${mine.map(x => `<span class="chip on num">${esc(x)}</span>`).join('')}</div><p class="muted num">合計 ${t.days}日・${fmtH(t.hours)}</p>` : '<p class="muted">今月の割り当てはありません。</p>') : '<p class="muted">「希望提出」で名前を選ぶと、自分の勤務日が表示されます。</p>'}
   </section>
-  <section class="card"><h2>${monthInfo(m).mo}月のシフト</h2>${sh.published ? '' : `<p class="muted num">公開されている週：${sh.weeks.map(wkRange).join('、')}<br>ほかの週は、店長が公開するとここに出ます。</p>`}<div class="list">${rows || '<p class="muted">まだ割り当てがありません。</p>'}</div></section>`;
+  <section class="card"><h2>${monthInfo(m).mo}月のシフト</h2><p class="muted num">公開されている週：${pubWeeks(sh, m).map(wkRange).join('、')}<br>ほかの週は、店長が公開するとここに出ます。</p><div class="list">${rows || '<p class="muted">まだ割り当てがありません。</p>'}</div></section>`;
 }
 
 /* ---------- 買い物のお願い：従業員が頼み、店長が買ったら消す ---------- */
