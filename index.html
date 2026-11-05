@@ -1136,10 +1136,13 @@ function viewPraiseStaff(){
     <div><button class="btn small" data-act="predit">書き直す</button></div><p class="muted">日曜日まで書き直せます。月曜日になると、また1枚贈れます。</p>`;
   else card = `<div class="field"><label for="prTo">だれに</label><select id="prTo"><option value="">— 選んでください —</option>${staff.filter(s => s.id !== S.me).map(s => `<option value="${esc(s.id)}" ${s.id === d.to ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}<option value="owner" ${d.to === 'owner' ? 'selected' : ''}>店長</option></select></div>
     <div class="field"><label for="prText">よかったところ・ありがとう</label><textarea id="prText" maxlength="200" rows="3" placeholder="例）うどんの盛り付けがとてもきれいで感動しました">${esc(d.text)}</textarea>
-      <p class="muted num"><span id="prCount">${d.text.length}</span>/200字・だれが書いたかは相手に出ません</p></div>
+      <p class="muted num"><span id="prCount">${d.text.length}</span>/200字・だれが書いたかは相手に出ません。翌週の月曜から、みんなも読めます</p></div>
     <div class="row">${P.sent ? '<button class="btn" data-act="prcancel">やめる</button>' : ''}<button class="btn primary grow" data-act="prsend" ${S.sending ? 'disabled' : ''}>${S.sending ? '送信中…' : P.sent ? '書き直して贈る' : 'カードを贈る'}</button></div>`;
   const got = mine ? P.got || [] : [];
   const gotRows = got.map(c => `<div class="li"><div class="grow"><div class="muted num">${md(c.at)}${c.boss ? '　<b>店長から</b>' : ''}</div><div class="ptext">${esc(c.text)}</div></div></div>`).join('');
+  const wall = P.wall || [];
+  const wallRows = wall.map((c, i) => `${i === 0 || wall[i - 1].week !== c.week ? `<h3 class="num" style="margin-top:${i ? 12 : 0}px">${wkRange(c.week)}の週</h3>` : ''}
+    <div class="li"><div class="grow"><div><b>${esc(prName(c.to))}</b> さんへ${c.boss ? '　<span class="muted">店長から</span>' : ''}</div><div class="ptext">${esc(c.text)}</div></div></div>`).join('');
   const mvps = (P.mvps || []).map(x => `<div class="li"><div class="grow"><b class="num">${moOf(x.m)}</b>　${x.pending ? '<span class="muted">同じ枚数の人がいるので、店長が決めています</span>' : `${esc(x.name || '（削除された人）')} さん`}</div><span class="pill short num">${x.count}枚</span></div>`).join('');
   return `
   <section class="card">
@@ -1151,6 +1154,11 @@ function viewPraiseStaff(){
     <div class="row between"><h2>あなたへのカード</h2>${got.length ? `<span class="pill short num">${got.length}枚</span>` : ''}</div>
     <div class="list">${gotRows || '<p class="muted">まだありません。</p>'}</div>
   </section>` : ''}
+  <section class="card">
+    <h2>みんなのカード</h2>
+    <p class="muted">先週までに贈られたカードです。だれが書いたかは出ません。</p>
+    <div class="list">${wallRows || '<p class="muted">まだありません。</p>'}</div>
+  </section>
   <section class="card">
     <h2>月間MVP</h2>
     <p class="muted">毎月、カードをいちばん多くもらった人が月間MVPです（店長からのカードは数えません）。</p>
@@ -1186,7 +1194,7 @@ function viewPraiseOwner(){
   </section>
   <section class="card">
     <h2>店長からカードを贈る</h2>
-    <p class="muted">何枚でも贈れます。もらった人には「店長から」と出ます。月間MVPの枚数には入りません。</p>
+    <p class="muted">何枚でも贈れます。もらった人には「店長から」と出ます。月間MVPの枚数には入りません。翌週の月曜から、みんなも読めます。</p>
     <div class="field"><label for="opTo">だれに</label><select id="opTo"><option value="">— 選んでください —</option>${staff.map(s => `<option value="${esc(s.id)}" ${s.id === od.to ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></div>
     <div class="field"><label for="opText">よかったところ・ありがとう</label><textarea id="opText" maxlength="200" rows="3" placeholder="例）忙しい時間にお客さまへの声かけが丁寧でした">${esc(od.text)}</textarea>
       <p class="muted num"><span id="opCount">${od.text.length}</span>/200字</p></div>
@@ -1200,7 +1208,7 @@ function viewPraiseOwner(){
   </section>
   <section class="card">
     <div class="row between"><h2>${moOf(m)}のカード</h2>${mCards.length ? `<span class="pill short num">${mCards.length}枚</span>` : ''}</div>
-    <p class="muted">送った人が見えるのは店長だけです。ふさわしくないカードは消せます。</p>
+    <p class="muted">送った人が見えるのは店長だけです。カードは翌週の月曜から「みんなのカード」として従業員も読めます（送った人は出ません）。それまでに、ふさわしくないカードは消しておけます。</p>
     <div class="list">${list || '<p class="muted">まだありません。</p>'}</div>
   </section>
   <section class="card">
