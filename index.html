@@ -84,6 +84,8 @@ main{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:16px;
 .shot{max-width:100%;max-height:220px;border-radius:10px;display:block;margin:4px 0}
 .itemchips .chip{padding:0;font-size:14px} .itemchips .chip button{border:0;background:none;color:inherit;font:inherit;padding:7px 12px;cursor:pointer}
 .itemchips .chip .x{padding:7px 10px 7px 2px;color:var(--muted)} .itemchips .chip.on .x{color:inherit}
+.bpick{display:flex;gap:6px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)}
+.bpick b{flex:0 1 40%;min-width:0;overflow-wrap:anywhere;font-size:14px} .bpick input{flex:1;min-width:0}
 .buyrow .grow{min-width:0} .buyrow b{display:block;overflow-wrap:anywhere} .buyrow .muted{font-size:12px;overflow-wrap:anywhere}
 
 .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
@@ -296,7 +298,7 @@ const S = {
   month:nextMonth(), tab:LS.get('sb.tab', 'req'), me:LS.get('sb.me', ''), key:LS.get('sb.key', ''),
   brush:'p', partA:LS.get('sb.partA', 540), partB:LS.get('sb.partB', 1260), lastAs:null, edit:null, draft:{days:{}, remark:''}, draftKey:'', dirty:false,
   isOwner:false, store:LS.get('sb.store', 'a'), selDay:null, wk:null, shiftMode:'week', showNg:false, confirmDel:null, needRender:false, sending:false,
-  buy:{}, buyDraft:{text:'', note:''}, items:{},
+  buy:{}, buyDraft:{picks:[], text:''}, items:{},
   leave:{}, leaveDraft:{who:'', from:'', to:'', part:'all', note:''},
   clean:{}, cleanWk:'this', cleanEdit:null, cleanCk:null, photos:{}
 };
@@ -966,12 +968,15 @@ function viewBuy(){
   const me = S.isOwner ? '' : `<div class="field"><label for="meSel">あなたの名前</label>
     <select id="meSel"><option value="">— 選んでください —</option>${staff.map(s => `<option value="${esc(s.id)}" ${s.id === S.me ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></div>`;
   const items = S.items[S.store]?.items || [];
-  const pick = items.length ? `<div class="field"><label>いつもの品名（タップで選ぶ）</label><div class="chips itemchips">${items.map(t => `<span class="chip ${S.buyDraft.text === t ? 'on' : ''}"><button data-act="buypick" data-t="${esc(t)}">${esc(t)}</button>${S.isOwner ? `<button class="x" data-act="itemdel" data-t="${esc(t)}" aria-label="${esc(t)}をリストから消す">×</button>` : ''}</span>`).join('')}</div>
+  const picks = S.buyDraft.picks, has = t => picks.some(x => x.text === t);
+  const pick = items.length ? `<div class="field"><label>いつもの品名（タップで選ぶ・いくつでも）</label><div class="chips itemchips">${items.map(t => `<span class="chip ${has(t) ? 'on' : ''}"><button data-act="buypick" data-t="${esc(t)}" aria-pressed="${has(t)}">${has(t) ? '✓ ' : ''}${esc(t)}</button>${S.isOwner ? `<button class="x" data-act="itemdel" data-t="${esc(t)}" aria-label="${esc(t)}をリストから消す">×</button>` : ''}</span>`).join('')}</div>
     ${S.isOwner ? '<p class="muted">× を押すとリストから消えます（お願いは消えません）。</p>' : ''}</div>` : '';
+  const chosen = picks.length ? `<div class="field"><label>お願いする物（${picks.length}件）・数やメモは任意</label>
+    ${picks.map((x, i) => `<div class="bpick"><b>${esc(x.text)}</b><input data-bnote="${i}" maxlength="60" placeholder="例）2本／いつもの" value="${esc(x.note)}" aria-label="${esc(x.text)}の数・メモ"><button class="btn small" data-act="buyrm" data-i="${i}" aria-label="${esc(x.text)}を外す">×</button></div>`).join('')}</div>` : '';
   const form = who ? `${pick}
-    <div class="field"><label for="buyText">${items.length ? '品名（リストに無いときは書く）' : '品名'}</label><input id="buyText" maxlength="40" placeholder="例）牛乳、ゴミ袋、レシートの紙" value="${esc(S.buyDraft.text)}"></div>
-    <div class="field"><label for="buyNote">数・メモ（任意）</label><input id="buyNote" maxlength="60" placeholder="例）2本／いつもの銘柄／明日までに" value="${esc(S.buyDraft.note)}"></div>
-    <button class="btn primary block" data-act="buyadd" ${S.sending ? 'disabled' : ''}>${S.sending ? '送信中…' : 'お願いする'}</button>`
+    <div class="field"><label for="buyText">${items.length ? 'リストに無い物は書いて「追加」' : '品名を書いて「追加」'}</label><div class="row" style="flex-wrap:nowrap"><input id="buyText" maxlength="40" placeholder="例）牛乳、ゴミ袋、レシートの紙" value="${esc(S.buyDraft.text)}" style="flex:1;min-width:0"><button class="btn" data-act="buyplus">追加</button></div></div>
+    ${chosen}
+    <button class="btn primary block" data-act="buyadd" ${S.sending ? 'disabled' : ''}>${S.sending ? '送信中…' : picks.length > 1 ? `まとめてお願いする（${picks.length}件）` : 'お願いする'}</button>`
     : '<p class="muted">名前を選ぶと、お願いを書けます。</p>';
   const rows = list.map(b => `<div class="li buyrow"><div class="grow"><b>${esc(b.text)}</b>
       ${b.note ? `<div class="muted">${esc(b.note)}</div>` : ''}<div class="muted num">${esc(buyName(b.staffId))}・${when(b.at)}</div></div>
@@ -988,23 +993,36 @@ function viewBuy(){
     <div class="list">${rows || '<p class="muted">お願いはまだありません。</p>'}</div>
   </section>`;
 }
+// 書きかけの品名を、お願いする物に足す（同じ物は2つにしない）
+function plusBuy(){
+  const t = S.buyDraft.text.trim();
+  if(!t) return false;
+  if(!S.buyDraft.picks.some(x => x.text === t)){
+    if(S.buyDraft.picks.length >= 20){ toast('一度に送れるのは20件までです'); return false; }
+    S.buyDraft.picks.push({text:t, note:''});
+  }
+  S.buyDraft.text = ''; return true;
+}
 async function addBuy(){
-  const text = S.buyDraft.text.trim(), note = S.buyDraft.note.trim(), staffId = buyWho();
-  if(!staffId) return;
-  if(!text){ toast('品名を書いてください'); $('#buyText')?.focus(); return; }
+  const staffId = buyWho();
+  if(!staffId || S.sending) return;
+  plusBuy();
+  const list = S.buyDraft.picks.map(x => ({text:x.text, note:x.note.trim()}));
+  if(!list.length){ render(); toast('品名を選ぶか、書いて「追加」を押してください'); $('#buyText')?.focus(); return; }
   S.sending = true; render();
   try{
-    const r = await api('addBuy', {store:S.store, staffId, text, note});
-    S.buy[r.id] = r.data; S.buyDraft = {text:'', note:''}; toast('お願いを送りました');
-    const cur = S.items[S.store]?.items || [];
-    S.items[S.store] = {items:[text, ...cur.filter(x => x !== text)].slice(0, 100)};
+    const r = await api('addBuy', {store:S.store, staffId, list});
+    (r.list || [{id:r.id, data:r.data}]).forEach(o => { S.buy[o.id] = o.data; });
+    S.buyDraft = {picks:[], text:''}; toast(list.length > 1 ? `${list.length}件のお願いを送りました` : 'お願いを送りました');
+    const cur = S.items[S.store]?.items || [], add = [...new Set(list.map(x => x.text))];
+    S.items[S.store] = {items:[...add, ...cur.filter(x => !add.includes(x))].slice(0, 100)};
   }catch(e){ toast(saveErr(e)); }
   S.sending = false; render();
 }
 async function delItem(text){
   const old = S.items[S.store]; if(!old) return;
   S.items[S.store] = {items:old.items.filter(x => x !== text)};
-  if(S.buyDraft.text === text) S.buyDraft.text = '';
+  S.buyDraft.picks = S.buyDraft.picks.filter(x => x.text !== text);
   render();
   try{ await api('delItem', {store:S.store, text}); }
   catch(e){ S.items[S.store] = old; render(); toast(saveErr(e)); }
@@ -1391,7 +1409,15 @@ document.addEventListener('click', async ev => {
   else if(a === 'csv') exportCsv();
   else if(a === 'buyadd') addBuy();
   else if(a === 'buydone') doneBuy(b.dataset.id);
-  else if(a === 'buypick'){ const t = b.dataset.t; S.buyDraft.text = S.buyDraft.text === t ? '' : t; render(); }
+  else if(a === 'buypick'){
+    const t = b.dataset.t, P = S.buyDraft.picks;
+    if(P.some(x => x.text === t)) S.buyDraft.picks = P.filter(x => x.text !== t);
+    else if(P.length >= 20) toast('一度に送れるのは20件までです');
+    else P.push({text:t, note:''});
+    render();
+  }
+  else if(a === 'buyplus'){ if(plusBuy()) render(); else $('#buyText')?.focus(); }
+  else if(a === 'buyrm'){ S.buyDraft.picks.splice(Number(b.dataset.i), 1); render(); }
   else if(a === 'itemdel') delItem(b.dataset.t);
   else if(a === 'leavepart'){ S.leaveDraft.part = b.dataset.p; render(); }
   else if(a === 'leaveadd') addLeave();
@@ -1537,13 +1563,14 @@ document.addEventListener('input', ev => {
   const t = ev.target;
   if(t.id === 'remark'){ S.draft.remark = t.value.slice(0, 500); markDirty(); }
   else if(t.id === 'buyText') S.buyDraft.text = t.value.slice(0, 40);
-  else if(t.id === 'buyNote') S.buyDraft.note = t.value.slice(0, 60);
+  else if(t.dataset.bnote && S.buyDraft.picks[Number(t.dataset.bnote)]) S.buyDraft.picks[Number(t.dataset.bnote)].note = t.value.slice(0, 60);
   else if(t.id === 'leaveNote') S.leaveDraft.note = t.value.slice(0, 100);
   else if(t.dataset.cname && S.cleanEdit?.[Number(t.dataset.cname)]) S.cleanEdit[Number(t.dataset.cname)].name = t.value.slice(0, 40);
 });
 document.addEventListener('focusout', () => setTimeout(() => { if(S.needRender) render(); }, 0));
 document.addEventListener('keydown', ev => {
   if(ev.key === 'Escape' && !$('#sheetWrap').hidden) closeSheet();
+  if(ev.key === 'Enter' && ev.target.id === 'buyText' && !ev.isComposing){ ev.preventDefault(); if(plusBuy()){ ev.target.blur(); render(); $('#buyText')?.focus(); } }
   if(ev.key === 'Enter' && ev.target.id === 'newStaff'){ ev.preventDefault(); document.querySelector('[data-act="addstaff"]').click(); }
 });
 
