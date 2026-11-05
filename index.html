@@ -306,7 +306,7 @@ const S = {
   buy:{}, buyDraft:{picks:[], text:''}, items:{},
   leave:{}, leaveDraft:{who:'', from:'', to:'', part:'all', note:''},
   clean:{}, cleanWk:'this', cleanEdit:null, cleanCk:null, photos:{},
-  praise:{}, prDraft:{to:'', text:'', edit:false}, prMonth:null
+  praise:{}, prDraft:{to:'', text:'', edit:false}, opDraft:{to:'', text:''}, prMonth:null
 };
 // 古い形式（早番・遅番）の設定にも、足りない項目は初期値を補う
 const settings = () => ({...DEFAULT_SETTINGS, ...(S.settings || {})});
@@ -1113,7 +1113,7 @@ const moOf = m => Number(m.slice(5)) + '月';
 const prCards = () => Object.entries(S.praise.cards || {}).filter(([, c]) => c && c.store === S.store).map(([id, c]) => ({id, ...c}));
 function prRank(m){
   const n = {};
-  prCards().forEach(c => { if(c.m === m && c.to !== 'owner') n[c.to] = (n[c.to] || 0) + 1; });
+  prCards().forEach(c => { if(c.m === m && c.to !== 'owner' && c.from !== 'owner') n[c.to] = (n[c.to] || 0) + 1; });
   return Object.entries(n).sort((a, b) => b[1] - a[1] || prName(a[0]).localeCompare(prName(b[0]), 'ja'));
 }
 function prMvp(m){
@@ -1139,7 +1139,7 @@ function viewPraiseStaff(){
       <p class="muted num"><span id="prCount">${d.text.length}</span>/200字・だれが書いたかは相手に出ません</p></div>
     <div class="row">${P.sent ? '<button class="btn" data-act="prcancel">やめる</button>' : ''}<button class="btn primary grow" data-act="prsend" ${S.sending ? 'disabled' : ''}>${S.sending ? '送信中…' : P.sent ? '書き直して贈る' : 'カードを贈る'}</button></div>`;
   const got = mine ? P.got || [] : [];
-  const gotRows = got.map(c => `<div class="li"><div class="grow"><div class="muted num">${md(c.at)}</div><div class="ptext">${esc(c.text)}</div></div></div>`).join('');
+  const gotRows = got.map(c => `<div class="li"><div class="grow"><div class="muted num">${md(c.at)}${c.boss ? '　<b>店長から</b>' : ''}</div><div class="ptext">${esc(c.text)}</div></div></div>`).join('');
   const mvps = (P.mvps || []).map(x => `<div class="li"><div class="grow"><b class="num">${moOf(x.m)}</b>　${x.pending ? '<span class="muted">同じ枚数の人がいるので、店長が決めています</span>' : `${esc(x.name || '（削除された人）')} さん`}</div><span class="pill short num">${x.count}枚</span></div>`).join('');
   return `
   <section class="card">
@@ -1153,12 +1153,12 @@ function viewPraiseStaff(){
   </section>` : ''}
   <section class="card">
     <h2>月間MVP</h2>
-    <p class="muted">毎月、カードをいちばん多くもらった人が月間MVPです。</p>
+    <p class="muted">毎月、カードをいちばん多くもらった人が月間MVPです（店長からのカードは数えません）。</p>
     <div class="list">${mvps || '<p class="muted">まだありません。</p>'}</div>
   </section>`;
 }
 function viewPraiseOwner(){
-  const P = S.praise, staff = staffList(), cards = prCards();
+  const P = S.praise, staff = staffList(), cards = prCards(), od = S.opDraft;
   const sent = new Set(cards.filter(c => c.week === P.week).map(c => c.from));
   const group = (title, list) => `<div><h3>${title}（${list.length}人）</h3>${list.length ? `<div class="chips" style="margin-top:6px">${list.map(s => `<span class="chip">${esc(s.name)}</span>`).join('')}</div>` : '<p class="muted">なし</p>'}</div>`;
   const mine = (P.toOwner || []).filter(c => c.store === S.store);
@@ -1183,6 +1183,14 @@ function viewPraiseOwner(){
     <h2>お褒めカード <span class="muted num" style="font-size:13px">今週 ${wkRange(P.week)}</span></h2>
     <p class="muted">贈るのは任意で、1人1週（月曜〜日曜）に1枚までです。</p>
     ${group('今週カードを贈った人', staff.filter(s => sent.has(s.id)))}
+  </section>
+  <section class="card">
+    <h2>店長からカードを贈る</h2>
+    <p class="muted">何枚でも贈れます。もらった人には「店長から」と出ます。月間MVPの枚数には入りません。</p>
+    <div class="field"><label for="opTo">だれに</label><select id="opTo"><option value="">— 選んでください —</option>${staff.map(s => `<option value="${esc(s.id)}" ${s.id === od.to ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></div>
+    <div class="field"><label for="opText">よかったところ・ありがとう</label><textarea id="opText" maxlength="200" rows="3" placeholder="例）忙しい時間にお客さまへの声かけが丁寧でした">${esc(od.text)}</textarea>
+      <p class="muted num"><span id="opCount">${od.text.length}</span>/200字</p></div>
+    <div class="row"><button class="btn primary grow" data-act="opsend" ${S.sending ? 'disabled' : ''}>${S.sending ? '送信中…' : 'カードを贈る'}</button></div>
   </section>
   <section class="card">
     <div class="chips">${months.map(x => `<button class="chip ${x === m ? 'on' : ''}" data-act="prmonth" data-m="${x}">${moOf(x)}</button>`).join('')}</div>
@@ -1210,6 +1218,18 @@ async function sendPraise(){
   try{
     const r = await api('sendPraise', {store:S.store, staffId:S.me, to:d.to, text, dev:devId()});
     S.praise.sent = r.sent; S.prDraft = {to:'', text:'', edit:false}; toast('カードを贈りました');
+  }catch(e){ toast(saveErr(e)); }
+  S.sending = false; render();
+}
+async function ownerPraise(){
+  const d = S.opDraft, text = d.text.trim();
+  if(S.sending) return;
+  if(!d.to){ toast('だれに贈るか選んでください'); return; }
+  if(!text){ toast('よかったところを書いてください'); $('#opText')?.focus(); return; }
+  S.sending = true; render();
+  try{
+    const r = await api('ownerPraise', {store:S.store, to:d.to, text});
+    S.praise.cards = {...(S.praise.cards || {}), [r.id]:r.card}; S.opDraft = {to:'', text:''}; toast('カードを贈りました');
   }catch(e){ toast(saveErr(e)); }
   S.sending = false; render();
 }
@@ -1541,6 +1561,7 @@ document.addEventListener('click', async ev => {
   else if(a === 'buyadd') addBuy();
   else if(a === 'prsend') sendPraise();
   else if(a === 'predit'){ S.prDraft = {to:S.praise.sent?.to || '', text:S.praise.sent?.text || '', edit:true}; render(); }
+  else if(a === 'opsend') ownerPraise();
   else if(a === 'prcancel'){ S.prDraft = {to:'', text:'', edit:false}; render(); }
   else if(a === 'prmonth'){ S.prMonth = b.dataset.m; render(); }
   else if(a === 'prmvp') setMvp(b.dataset.m, b.dataset.id);
@@ -1701,6 +1722,8 @@ document.addEventListener('input', ev => {
   if(t.id === 'remark'){ S.draft.remark = t.value.slice(0, 500); markDirty(); }
   else if(t.id === 'buyText') S.buyDraft.text = t.value.slice(0, 40);
   else if(t.id === 'prTo') S.prDraft.to = t.value;
+  else if(t.id === 'opTo') S.opDraft.to = t.value;
+  else if(t.id === 'opText'){ S.opDraft.text = t.value.slice(0, 200); const c = $('#opCount'); if(c) c.textContent = S.opDraft.text.length; }
   else if(t.id === 'prText'){ S.prDraft.text = t.value.slice(0, 200); const c = $('#prCount'); if(c) c.textContent = S.prDraft.text.length; }
   else if(t.dataset.bnote && S.buyDraft.picks[Number(t.dataset.bnote)]) S.buyDraft.picks[Number(t.dataset.bnote)].note = t.value.slice(0, 60);
   else if(t.id === 'leaveNote') S.leaveDraft.note = t.value.slice(0, 100);
