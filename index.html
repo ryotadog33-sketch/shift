@@ -1134,7 +1134,7 @@ function viewPraiseStaff(){
   else if(!mine) card = '<p class="muted">読み込み中…</p>';
   else if(P.sent && !d.edit) card = `<div><p>今週は <b>${esc(prName(P.sent.to))}</b>${P.sent.to === 'owner' ? '' : ' さん'}にカードを贈りました。</p><div class="psent">${esc(P.sent.text)}</div></div>
     <div><button class="btn small" data-act="predit">書き直す</button></div><p class="muted">日曜日まで書き直せます。月曜日になると、また1枚贈れます。</p>`;
-  else card = `<div class="field"><label for="prTo">だれに</label><select id="prTo"><option value="">— 選んでください —</option><option value="owner" ${d.to === 'owner' ? 'selected' : ''}>店長</option>${staff.filter(s => s.id !== S.me).map(s => `<option value="${esc(s.id)}" ${s.id === d.to ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></div>
+  else card = `<div class="field"><label for="prTo">だれに</label><select id="prTo"><option value="">— 選んでください —</option>${staff.filter(s => s.id !== S.me).map(s => `<option value="${esc(s.id)}" ${s.id === d.to ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}<option value="owner" ${d.to === 'owner' ? 'selected' : ''}>店長</option></select></div>
     <div class="field"><label for="prText">よかったところ・ありがとう</label><textarea id="prText" maxlength="200" rows="3" placeholder="例）うどんの盛り付けがとてもきれいで感動しました">${esc(d.text)}</textarea>
       <p class="muted num"><span id="prCount">${d.text.length}</span>/200字・だれが書いたかは相手に出ません</p></div>
     <div class="row">${P.sent ? '<button class="btn" data-act="prcancel">やめる</button>' : ''}<button class="btn primary grow" data-act="prsend" ${S.sending ? 'disabled' : ''}>${S.sending ? '送信中…' : P.sent ? '書き直して贈る' : 'カードを贈る'}</button></div>`;
@@ -1144,7 +1144,7 @@ function viewPraiseStaff(){
   return `
   <section class="card">
     <h2>お褒めカード <span class="muted num" style="font-size:13px">今週 ${wkRange(P.week)}</span></h2>
-    <p class="muted">いっしょに働く人のよかったところを見つけたら、カードを贈れます。1週間（月曜〜日曜）に1枚まで。店長に贈ることもできます。贈るかどうかは自由です。</p>
+    <p class="muted">いっしょに働く人のよかったところを見つけたら、カードを贈れます。1週間（月曜〜日曜）に1枚まで。贈るかどうかは自由です。</p>
     ${me}${card}
   </section>
   ${S.me ? `<section class="card">
