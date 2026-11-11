@@ -306,7 +306,8 @@ const S = {
   buy:{}, buyDraft:{picks:[], text:''}, items:{},
   leave:{}, leaveDraft:{who:'', from:'', to:'', part:'all', note:''},
   clean:{}, cleanWk:'this', cleanEdit:null, cleanCk:null, photos:{},
-  praise:{}, prDraft:{to:'', text:'', edit:false}, opDraft:{to:'', text:''}, prMonth:null
+  praise:{}, prDraft:{to:'', text:'', edit:false}, opDraft:{to:'', text:''}, prMonth:null,
+  todo:{}, todoDraft:{text:'', due:'', before:0}
 };
 // 古い形式（早番・遅番）の設定にも、足りない項目は初期値を補う
 const settings = () => ({...DEFAULT_SETTINGS, ...(S.settings || {})});
@@ -399,6 +400,7 @@ function refresh(){
       S.leave = d.leave || {};
       S.clean = d.clean || {};
       S.praise = d.praise || {};
+      S.todo = d.todo || {};
       const sh = {...(d.shifts || {})};
       for(const m of Object.keys(S.shifts)) if(isPending('shifts/' + m)) sh[m] = S.shifts[m];
       S.shifts = sh;
@@ -550,12 +552,12 @@ function render(){
   $('#monthLabel').textContent = `${y}年${mo}月`;
   $('#brand').textContent = curStore().name || 'こがねノート';
   const tabs = S.isOwner
-    ? [['req','○','希望提出'], ['sum','∑','集計'], ['shift','▦','シフト'], ['buy','✓','買い物'], ['leave','◇','有給'], ['clean','□','清掃'], ['praise','♡','ほめる'], ['set','⚙','設定']]
+    ? [['req','○','希望提出'], ['sum','∑','集計'], ['shift','▦','シフト'], ['buy','✓','買い物'], ['leave','◇','有給'], ['clean','□','清掃'], ['praise','♡','ほめる'], ['todo','★','TODO'], ['set','⚙','設定']]
     : [['req','○','希望提出'], ['my','▦','シフト'], ['buy','✓','お願い'], ['leave','◇','有給'], ['clean','□','清掃'], ['praise','♡','ほめる']];
   if(!tabs.some(t => t[0] === S.tab)) S.tab = 'req';
   // 店長には、まだ買っていないお願い・まだ確認していない有給の件数をタブに出す。清掃は今週の残りを全員に
   const ready = S.isOwner && S.mode === 'ready';
-  const cnt = { buy:ready ? buyList().length : 0, leave:ready ? leaveList().length : 0, clean:S.mode === 'ready' ? cleanLeft() : 0 };
+  const cnt = { todo:ready ? todoList().length : 0, buy:ready ? buyList().length : 0, leave:ready ? leaveList().length : 0, clean:S.mode === 'ready' ? cleanLeft() : 0 };
   $('#tabs').classList.toggle('many', tabs.length > 5);
   $('#tabs').classList.toggle('lots', tabs.length > 7);
   $('#tabs').innerHTML = tabs.map(([k, g, l]) => `<button class="tab" data-act="tab" data-t="${k}" ${S.tab === k ? 'aria-current="page"' : ''}><span class="g">${g}</span>${l}${cnt[k] ? `<span class="badge num" aria-label="${cnt[k]}件">${cnt[k]}</span>` : ''}</button>`).join('');
@@ -564,7 +566,7 @@ function render(){
     $('#view').innerHTML = `<section class="card"><div class="empty"><h2>読み込めませんでした</h2><p>${esc(S.err)}</p><button class="btn primary" data-act="refresh">もう一度読み込む</button></div></section>`;
     return;
   }
-  const v = { req:viewReq, sum:viewSum, shift:viewShift, set:viewSet, my:viewMy, buy:viewBuy, leave:viewLeave, clean:viewClean, praise:viewPraise }[S.tab]();
+  const v = { req:viewReq, sum:viewSum, shift:viewShift, set:viewSet, my:viewMy, buy:viewBuy, leave:viewLeave, clean:viewClean, praise:viewPraise, todo:viewTodo }[S.tab]();
   const banner = S.err ? `<div class="banner"><span>${esc(S.err)}</span><button class="btn small" data-act="refresh">再読み込み</button></div>` : '';
   // 店長には店舗の切り替えボタンを出す（2店舗以上のとき）
   const ss = stores();
@@ -1034,6 +1036,59 @@ async function delItem(text){
   render();
   try{ await api('delItem', {store:S.store, text}); }
   catch(e){ S.items[S.store] = old; render(); toast(saveErr(e)); }
+}
+
+/* ---------- 店長だけのTODO：従業員の画面には出ない。終わったら消す。日時を入れるとGoogleカレンダーで通知 ---------- */
+// 日時が決まっているものを先（近い順）、決まっていないものは書いた順
+const todoList = () => Object.entries(S.todo).filter(([, t]) => t).map(([id, t]) => ({id, ...t}))
+  .sort((a, b) => (a.due ? 0 : 1) - (b.due ? 0 : 1) || (a.due && b.due ? a.due - b.due : a.at - b.at));
+const TODO_BEFORE = {0:'その時間ちょうど', 10:'10分前', 30:'30分前', 60:'1時間前'};
+const dueTxt = ms => { const d = new Date(ms), p = n => String(n).padStart(2, '0'); return `${d.getMonth() + 1}/${d.getDate()}(${WD[d.getDay()]}) ${p(d.getHours())}:${p(d.getMinutes())}`; };
+function viewTodo(){
+  const d = S.todoDraft, list = todoList(), now = Date.now();
+  const rows = list.map(t => { const late = t.due && t.due < now;
+    return `<div class="li buyrow"><div class="grow"><b>${esc(t.text)}</b>
+      ${t.due ? `<div class="muted num"${late ? ' style="color:var(--ng);font-weight:700"' : ''}>⏰ ${dueTxt(t.due)}${t.before ? '（' + TODO_BEFORE[t.before] + 'に通知）' : ''}${late ? '　時間を過ぎています' : ''}</div>` : ''}</div>
+      <button class="btn small primary" data-act="tododone" data-id="${esc(t.id)}">終わった</button></div>`; }).join('');
+  return `
+  <section class="card">
+    <h2>自分だけのTODO</h2>
+    <p class="muted">店長だけに見えるページです。従業員の画面には出ません（両店共通）。</p>
+    <div class="field"><label for="todoText">やること</label><input id="todoText" maxlength="60" placeholder="例）銀行で両替、ガス屋さんに電話" value="${esc(d.text)}"></div>
+    <div class="field"><label for="todoDue">日にち・時間（決まっているときだけ）</label><input id="todoDue" type="datetime-local" value="${esc(d.due)}"></div>
+    <div class="field"><label for="todoBefore">通知のタイミング（日時を入れたときだけ）</label><select id="todoBefore">${Object.entries(TODO_BEFORE).map(([k, l]) => `<option value="${k}" ${Number(k) === d.before ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <p class="muted">日時を入れると、スマホのGoogleカレンダーに予定が入り、その時間に通知が鳴ります。</p></div>
+    <button class="btn primary block" data-act="todoadd" ${S.sending ? 'disabled' : ''}>${S.sending ? '送信中…' : '追加する'}</button>
+  </section>
+  <section class="card">
+    <div class="row between"><h2>やることの一覧</h2>${list.length ? `<span class="pill short num">${list.length}件</span>` : ''}</div>
+    <p class="muted">終わったら「終わった」を押すと一覧から消えます（カレンダーの予定も消えます）。</p>
+    <div class="list">${rows || '<p class="muted">やることはありません。</p>'}</div>
+  </section>`;
+}
+async function addTodo(){
+  const d = S.todoDraft, text = d.text.trim();
+  if(S.sending) return;
+  if(!text){ toast('やることを書いてください'); $('#todoText')?.focus(); return; }
+  let due = null;
+  if(d.due){
+    due = new Date(d.due).getTime();
+    if(!Number.isFinite(due)){ toast('日にち・時間を確かめてください'); return; }
+    if(due < Date.now()){ toast('もう過ぎた時間です。日にち・時間を確かめてください'); return; }
+  }
+  S.sending = true; render();
+  try{
+    const r = await api('addTodo', {text, due, before:d.before});
+    S.todo[r.id] = r.data; S.todoDraft = {text:'', due:'', before:0};
+    toast(due ? '追加しました（カレンダーに通知を入れました）' : '追加しました');
+  }catch(e){ toast(e && e.code && /calendar|カレンダー|permission|権限/i.test(e.code) ? 'カレンダーに予定を入れられませんでした。カレンダーの許可を確かめてください' : saveErr(e)); }
+  S.sending = false; render();
+}
+async function doneTodo(id){
+  const t = S.todo[id]; if(!t) return;
+  delete S.todo[id]; render();
+  try{ await api('doneTodo', {id}); toast('一覧から消しました'); }
+  catch(e){ S.todo[id] = t; render(); toast(saveErr(e)); }
 }
 
 /* ---------- 有給の届け出：従業員が届け、店長が確認したら消す ---------- */
@@ -1567,6 +1622,8 @@ document.addEventListener('click', async ev => {
   else if(a === 'pubweek') toggleWeek(weekDays(S.month, S.wk));
   else if(a === 'csv') exportCsv();
   else if(a === 'buyadd') addBuy();
+  else if(a === 'todoadd') addTodo();
+  else if(a === 'tododone') doneTodo(b.dataset.id);
   else if(a === 'prsend') sendPraise();
   else if(a === 'predit'){ S.prDraft = {to:S.praise.sent?.to || '', text:S.praise.sent?.text || '', edit:true}; render(); }
   else if(a === 'opsend') ownerPraise();
@@ -1729,6 +1786,9 @@ document.addEventListener('input', ev => {
   const t = ev.target;
   if(t.id === 'remark'){ S.draft.remark = t.value.slice(0, 500); markDirty(); }
   else if(t.id === 'buyText') S.buyDraft.text = t.value.slice(0, 40);
+  else if(t.id === 'todoText') S.todoDraft.text = t.value.slice(0, 60);
+  else if(t.id === 'todoDue') S.todoDraft.due = t.value;
+  else if(t.id === 'todoBefore') S.todoDraft.before = Number(t.value) || 0;
   else if(t.id === 'prTo') S.prDraft.to = t.value;
   else if(t.id === 'opTo') S.opDraft.to = t.value;
   else if(t.id === 'opText'){ S.opDraft.text = t.value.slice(0, 200); const c = $('#opCount'); if(c) c.textContent = S.opDraft.text.length; }
@@ -1741,6 +1801,7 @@ document.addEventListener('focusout', () => setTimeout(() => { if(S.needRender) 
 document.addEventListener('keydown', ev => {
   if(ev.key === 'Escape' && !$('#sheetWrap').hidden) closeSheet();
   if(ev.key === 'Enter' && ev.target.id === 'buyText' && !ev.isComposing){ ev.preventDefault(); if(plusBuy()){ ev.target.blur(); render(); $('#buyText')?.focus(); } }
+  if(ev.key === 'Enter' && ev.target.id === 'todoText' && !ev.isComposing){ ev.preventDefault(); ev.target.blur(); addTodo(); }
   if(ev.key === 'Enter' && ev.target.id === 'newStaff'){ ev.preventDefault(); document.querySelector('[data-act="addstaff"]').click(); }
 });
 
