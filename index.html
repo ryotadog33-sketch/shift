@@ -293,6 +293,16 @@ const API_URL = String(window.SHIFT_API_URL || '').trim();
 const ym = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 const dk = i => String(i).padStart(2,'0');
 function nextMonth(){ const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()+1); return ym(d); }
+// シフトを見るタブ（店長「シフト」・従業員「シフト」）は今月の今週から、希望提出・集計は来月から開く。
+// 同じ種類のタブの間を行き来したとき（シフト→TODO→シフトなど）は、見ていた月・週のまま
+const monthKind = t => t === 'shift' || t === 'my' ? 'now' : t === 'req' || t === 'sum' ? 'next' : '';
+function autoMonth(){
+  const k = monthKind(S.tab);
+  if(!k || k === S.monthKind) return;
+  S.monthKind = k; S.wk = null; S.shiftMode = 'week';
+  if(k === 'now'){ const t = new Date(); S.month = ym(t); S.selDay = dk(t.getDate()); }
+  else { S.month = nextMonth(); S.selDay = null; }
+}
 function monthInfo(m){ const [y, mo] = m.split('-').map(Number); return { y, mo, n:new Date(y, mo, 0).getDate(), first:new Date(y, mo-1, 1).getDay() }; }
 const dow = (m, i) => { const {y, mo} = monthInfo(m); return new Date(y, mo-1, i).getDay(); };
 const dayLabel = (m, i) => `${monthInfo(m).mo}月${i}日(${WD[dow(m, i)]})`;
@@ -551,10 +561,12 @@ function render(){
   const {y, mo} = monthInfo(S.month);
   $('#monthLabel').textContent = `${y}年${mo}月`;
   $('#brand').textContent = curStore().name || 'こがねノート';
-  const tabs = S.isOwner
+  // 読み込み中は、合言葉があれば店長のタブで待つ（前回開いていたタブのまま開くため）
+  const tabs = S.isOwner || (S.key && S.mode === 'loading')
     ? [['req','○','希望提出'], ['sum','∑','集計'], ['shift','▦','シフト'], ['buy','✓','買い物'], ['leave','◇','有給'], ['clean','□','清掃'], ['praise','♡','ほめる'], ['todo','★','TODO'], ['set','⚙','設定']]
     : [['req','○','希望提出'], ['my','▦','シフト'], ['buy','✓','お願い'], ['leave','◇','有給'], ['clean','□','清掃'], ['praise','♡','ほめる']];
   if(!tabs.some(t => t[0] === S.tab)) S.tab = 'req';
+  autoMonth();
   // 店長には、まだ買っていないお願い・まだ確認していない有給の件数をタブに出す。清掃は今週の残りを全員に
   const ready = S.isOwner && S.mode === 'ready';
   const cnt = { todo:ready ? todoList().length : 0, buy:ready ? buyList().length : 0, leave:ready ? leaveList().length : 0, clean:S.mode === 'ready' ? cleanLeft() : 0 };
@@ -1560,7 +1572,7 @@ document.addEventListener('click', async ev => {
   const a = b.dataset.act;
   if(a === 'month'){ const [y, mo] = S.month.split('-').map(Number); S.month = ym(new Date(y, mo - 1 + Number(b.dataset.d), 1)); S.selDay = null; S.wk = null; render(); window.scrollTo(0, 0); }
   else if(a === 'refresh'){ await refresh(); if(!S.err) toast('最新の内容にしました'); }
-  else if(a === 'tab'){ S.tab = b.dataset.t; LS.set('sb.tab', S.tab); render(); window.scrollTo(0, 0); }
+  else if(a === 'tab'){ S.tab = b.dataset.t; LS.set('sb.tab', S.tab); autoMonth(); render(); window.scrollTo(0, 0); }
   else if(a === 'brush'){ S.brush = b.dataset.b; render(); }
   else if(a === 'paint'){
     const d = b.dataset.day, cur = S.draft.days[d];
@@ -1582,7 +1594,7 @@ document.addEventListener('click', async ev => {
   else if(a === 'copy') copyText(b.dataset.text);
   else if(a === 'close') closeSheet();
   else if(a === 'sumday') sumDaySheet(b.dataset.day);
-  else if(a === 'goshift'){ S.selDay = b.dataset.day; S.shiftMode = 'day'; S.tab = 'shift'; LS.set('sb.tab', S.tab); closeSheet(); render(); window.scrollTo(0, 0); }
+  else if(a === 'goshift'){ S.selDay = b.dataset.day; S.shiftMode = 'day'; S.tab = 'shift'; S.monthKind = 'now'; LS.set('sb.tab', S.tab); closeSheet(); render(); window.scrollTo(0, 0); }
   else if(a === 'selday'){ S.selDay = b.dataset.day; render(); }
   else if(a === 'dstep'){ const {n} = monthInfo(S.month); S.selDay = dk(Math.min(n, Math.max(1, Number(S.selDay) + Number(b.dataset.d)))); render(); }
   else if(a === 'wday'){ S.selDay = b.dataset.day; S.shiftMode = 'day'; render(); window.scrollTo(0, 0); }
