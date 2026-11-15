@@ -289,6 +289,8 @@ const SYM = {o:'○', p:'○', x:'×'};
 const DEFAULT_SETTINGS = { store:'', deadline:'', open:540, close:1260, bands:[{s:540, e:1260, n:2}], presets:['9:00-15:00', '15:00-21:00', '9:00-21:00'],
   roles:['レジ', '麺', '洗い場', '天ぷら', '玉取', '渡し', '高岡'] };
 const API_URL = String(window.SHIFT_API_URL || '').trim();
+// 仕込みの割り振りを従業員の画面にも出すか。お試し中は false（店長だけ）。出すときは true にし、shift-api.gs の JOB_STAFF も true にする
+const JOB_STAFF = false;
 
 const ym = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 const dk = i => String(i).padStart(2,'0');
@@ -317,7 +319,8 @@ const S = {
   leave:{}, leaveDraft:{who:'', from:'', to:'', part:'all', note:''},
   clean:{}, cleanWk:'this', cleanEdit:null, cleanCk:null, photos:{},
   praise:{}, prDraft:{to:'', text:'', edit:false}, opDraft:{to:'', text:''}, prMonth:null,
-  todo:{}, todoDraft:{text:'', due:'', before:0}
+  todo:{}, todoDraft:{text:'', due:'', before:0},
+  job:{}, jobDraft:{who:[], text:''}, jobDay:''
 };
 // 古い形式（早番・遅番）の設定にも、足りない項目は初期値を補う
 const settings = () => ({...DEFAULT_SETTINGS, ...(S.settings || {})});
@@ -411,6 +414,7 @@ function refresh(){
       S.clean = d.clean || {};
       S.praise = d.praise || {};
       S.todo = d.todo || {};
+      S.job = d.job || {};
       const sh = {...(d.shifts || {})};
       for(const m of Object.keys(S.shifts)) if(isPending('shifts/' + m)) sh[m] = S.shifts[m];
       S.shifts = sh;
@@ -564,12 +568,12 @@ function render(){
   // 読み込み中は、合言葉があれば店長のタブで待つ（前回開いていたタブのまま開くため）
   const tabs = S.isOwner || (S.key && S.mode === 'loading')
     ? [['req','○','希望提出'], ['sum','∑','集計'], ['shift','▦','シフト'], ['buy','✓','買い物'], ['leave','◇','有給'], ['clean','□','清掃'], ['praise','♡','ほめる'], ['todo','★','TODO'], ['set','⚙','設定']]
-    : [['req','○','希望提出'], ['my','▦','シフト'], ['buy','✓','お願い'], ['leave','◇','有給'], ['clean','□','清掃'], ['praise','♡','ほめる']];
+    : [['req','○','希望提出'], ['my','▦','シフト'], ['job','☞','やること'], ['buy','✓','お願い'], ['leave','◇','有給'], ['clean','□','清掃'], ['praise','♡','ほめる']].filter(t => JOB_STAFF || t[0] !== 'job');
   if(!tabs.some(t => t[0] === S.tab)) S.tab = 'req';
   autoMonth();
   // 店長には、まだ買っていないお願い・まだ確認していない有給の件数をタブに出す。清掃は今週の残りを全員に
   const ready = S.isOwner && S.mode === 'ready';
-  const cnt = { todo:ready ? todoList().length : 0, buy:ready ? buyList().length : 0, leave:ready ? leaveList().length : 0, clean:S.mode === 'ready' ? cleanLeft() : 0 };
+  const cnt = { todo:ready ? todoList().length : 0, job:!S.isOwner && S.mode === 'ready' ? jobList().length : 0, buy:ready ? buyList().length : 0, leave:ready ? leaveList().length : 0, clean:S.mode === 'ready' ? cleanLeft() : 0 };
   $('#tabs').classList.toggle('many', tabs.length > 5);
   $('#tabs').classList.toggle('lots', tabs.length > 7);
   $('#tabs').innerHTML = tabs.map(([k, g, l]) => `<button class="tab" data-act="tab" data-t="${k}" ${S.tab === k ? 'aria-current="page"' : ''}><span class="g">${g}</span>${l}${cnt[k] ? `<span class="badge num" aria-label="${cnt[k]}件">${cnt[k]}</span>` : ''}</button>`).join('');
@@ -578,7 +582,7 @@ function render(){
     $('#view').innerHTML = `<section class="card"><div class="empty"><h2>読み込めませんでした</h2><p>${esc(S.err)}</p><button class="btn primary" data-act="refresh">もう一度読み込む</button></div></section>`;
     return;
   }
-  const v = { req:viewReq, sum:viewSum, shift:viewShift, set:viewSet, my:viewMy, buy:viewBuy, leave:viewLeave, clean:viewClean, praise:viewPraise, todo:viewTodo }[S.tab]();
+  const v = { req:viewReq, sum:viewSum, shift:viewShift, set:viewSet, my:viewMy, buy:viewBuy, leave:viewLeave, clean:viewClean, praise:viewPraise, todo:viewTodo, job:viewJob }[S.tab]();
   const banner = S.err ? `<div class="banner"><span>${esc(S.err)}</span><button class="btn small" data-act="refresh">再読み込み</button></div>` : '';
   // 店長には店舗の切り替えボタンを出す（2店舗以上のとき）
   const ss = stores();
@@ -1062,7 +1066,7 @@ function viewTodo(){
     return `<div class="li buyrow"><div class="grow"><b>${esc(t.text)}</b>
       ${t.due ? `<div class="muted num"${late ? ' style="color:var(--ng);font-weight:700"' : ''}>⏰ ${dueTxt(t.due)}${t.before ? '（' + TODO_BEFORE[t.before] + 'に通知）' : ''}${late ? '　時間を過ぎています' : ''}</div>` : ''}</div>
       <button class="btn small primary" data-act="tododone" data-id="${esc(t.id)}">終わった</button></div>`; }).join('');
-  return `
+  return jobOwnerCards() + `
   <section class="card">
     <h2>自分だけのTODO</h2>
     <p class="muted">店長だけに見えるページです。従業員の画面には出ません（両店共通）。</p>
@@ -1101,6 +1105,89 @@ async function doneTodo(id){
   delete S.todo[id]; render();
   try{ await api('doneTodo', {id}); toast('一覧から消しました'); }
   catch(e){ S.todo[id] = t; render(); toast(saveErr(e)); }
+}
+
+/* ---------- 頼みごと（その日の仕込みの割り振り）：店長が日ごとに「だれに・なにを」を割り振る。
+   店の全員が見られ、頼まれた本人が「終わった」を押すと消える ---------- */
+const dayStr = n => { const d = new Date(); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+// 見ている日（今日・明日など）。従業員は、日付が変わったら今日に戻す
+const jobDay = () => { if(!S.jobDay || (!S.isOwner && S.jobDay < dayStr(0))) S.jobDay = dayStr(0); return S.jobDay; };
+const jobsOn = day => Object.entries(S.job).filter(([, j]) => j && j.store === S.store && j.day === day)
+  .map(([id, j]) => ({id, ...j})).sort((a, b) => a.at - b.at);
+// タブの数字：今日、自分に割り振られている分
+const jobList = () => S.me ? jobsOn(dayStr(0)).filter(j => j.staffId === S.me) : [];
+const dayName = day => day === dayStr(0) ? '今日' : day === dayStr(1) ? '明日' : day === dayStr(-1) ? '昨日' : '';
+function jobDayBar(){
+  const day = jobDay();
+  return `<div class="field"><label>日にち</label><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
+    ${[0, 1].map(n => `<button class="chip ${day === dayStr(n) ? 'on' : ''}" data-act="jobday" data-d="${dayStr(n)}" style="padding:7px 16px;font-size:14px">${n ? '明日' : '今日'}</button>`).join('')}
+    ${S.isOwner ? `<input id="jobDate" type="date" value="${esc(day)}" style="flex:1;min-width:140px">` : ''}
+    </div><div class="muted num" style="margin-top:4px">${dayName(day) ? dayName(day) + '・' : ''}${ymd(day)}</div></div>`;
+}
+// その日の割り振りを、人ごとにまとめた表。本人の分には「終わった」、店長には「取り消す」
+function jobBoard(day){
+  const list = jobsOn(day), by = {};
+  list.forEach(j => (by[j.staffId] = by[j.staffId] || []).push(j));
+  const ids = Object.keys(by).sort((a, b) => (a === S.me ? -1 : b === S.me ? 1 : 0) || (S.staff[a]?.order || 0) - (S.staff[b]?.order || 0));
+  if(!ids.length) return `<p class="muted">${dayName(day) || ymd(day)}の割り振りは、まだありません。</p>`;
+  return ids.map(sid => { const mine = !S.isOwner && sid === S.me;
+    return `<div style="margin-top:12px;${mine ? 'background:#eef3ff;border-radius:10px;padding:6px 10px' : ''}">
+      <b>${esc(buyName(sid))}さん</b>${mine ? '（あなた）' : ''}　<span class="muted num">${by[sid].length}件</span>
+      ${by[sid].map(j => { const ask = S.confirmDel === 'job' + j.id;
+        const btn = S.isOwner ? `<button class="btn small ${ask ? 'danger' : ''}" data-act="jobcancel" data-id="${esc(j.id)}">${ask ? 'もう一度押すと取り消し' : '取り消す'}</button>`
+          : mine ? `<button class="btn primary" data-act="jobdone" data-id="${esc(j.id)}">終わった</button>` : '';
+        return `<div class="li buyrow"><div class="grow">${mine ? `<b style="font-size:17px">${esc(j.text)}</b>` : esc(j.text)}</div>${btn}</div>`; }).join('')}
+    </div>`; }).join('');
+}
+function jobOwnerCards(){
+  const d = S.jobDraft, staff = staffList(), day = jobDay(), n = jobsOn(day).length;
+  d.who = d.who.filter(id => staff.some(s => s.id === id));
+  const chips = staff.map(s => `<button class="chip ${d.who.includes(s.id) ? 'on' : ''}" data-act="jobwho" data-id="${esc(s.id)}" aria-pressed="${d.who.includes(s.id)}" style="padding:7px 14px;font-size:14px">${esc(s.name)}</button>`).join('');
+  return `
+  <section class="card">
+    <h2>仕込みの割り振り</h2>
+    <p class="muted">日にちと名前を選んで、やってほしいことを書きます。店の全員のアプリの「やること」に出て、終わったら本人が「終わった」を押すと消えます。</p>
+    ${jobDayBar()}
+    ${staff.length ? `<div class="field"><label>だれに（何人でも選べます）</label><div class="chips">${chips}</div></div>
+    <div class="field"><label for="jobText">やってほしいこと</label><input id="jobText" maxlength="60" placeholder="例）茄子の仕込み" value="${esc(d.text)}"></div>
+    <button class="btn primary block" data-act="jobadd" ${S.sending ? 'disabled' : ''}>${S.sending ? '送信中…' : '割り振る'}</button>` : '<p class="muted">「設定」で従業員を登録すると割り振れるようになります。</p>'}
+  </section>
+  <section class="card">
+    <div class="row between"><h2>${dayName(day) || ymd(day)}の割り振り（まだ終わっていない）</h2>${n ? `<span class="pill short num">${n}件</span>` : ''}</div>
+    <div class="list">${jobBoard(day)}</div>
+  </section>`;
+}
+function viewJob(){
+  const staff = staffList(), day = jobDay();
+  const pick = `<div class="field"><label for="meSel">あなたの名前</label><select id="meSel"><option value="">— 選んでください —</option>${staff.map(s => `<option value="${esc(s.id)}" ${s.id === S.me ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></div>`;
+  return `<section class="card">
+    <h2>仕込みの割り振り</h2>
+    ${jobDayBar()}
+    ${pick}
+    <p class="muted">${S.me ? '自分の分が終わったら「終わった」を押してください。一覧から消えて、店長にも伝わります。' : '名前を選ぶと、自分の分に「終わった」ボタンが出ます。'}</p>
+    <div class="list">${jobBoard(day)}</div>
+  </section>`;
+}
+async function addJob(){
+  const d = S.jobDraft, text = d.text.trim(), day = jobDay();
+  if(S.sending) return;
+  if(!d.who.length){ toast('だれに頼むか、名前を選んでください'); return; }
+  if(!text){ toast('やってほしいことを書いてください'); $('#jobText')?.focus(); return; }
+  S.sending = true; render();
+  try{
+    const r = await api('addJob', {staffIds:d.who, text, day});
+    (r.list || []).forEach(o => { S.job[o.id] = o.data; });
+    toast(`${dayName(day) || ymd(day)}の分を${d.who.map(id => buyName(id) + 'さん').join('・')}に割り振りました`);
+    // 同じ人に続けて割り振れるよう、名前はそのまま残す
+    S.jobDraft = {who:d.who, text:''};
+  }catch(e){ toast(e && e.code === 'bad_date' ? '日にちを確かめてください（昨日〜1か月先まで）' : saveErr(e)); }
+  S.sending = false; render();
+}
+async function doneJob(id){
+  const j = S.job[id]; if(!j) return;
+  delete S.job[id]; render();
+  try{ await api('doneJob', {id, staffId:S.isOwner ? '' : S.me}); toast(S.isOwner ? '取り消しました' : 'おつかれさまでした！'); }
+  catch(e){ S.job[id] = j; render(); toast(saveErr(e)); }
 }
 
 /* ---------- 有給の届け出：従業員が届け、店長が確認したら消す ---------- */
@@ -1636,6 +1723,11 @@ document.addEventListener('click', async ev => {
   else if(a === 'buyadd') addBuy();
   else if(a === 'todoadd') addTodo();
   else if(a === 'tododone') doneTodo(b.dataset.id);
+  else if(a === 'jobwho'){ const w = S.jobDraft.who, id = b.dataset.id; S.jobDraft.who = w.includes(id) ? w.filter(x => x !== id) : [...w, id]; render(); }
+  else if(a === 'jobadd') addJob();
+  else if(a === 'jobday'){ S.jobDay = b.dataset.d; render(); }
+  else if(a === 'jobdone') doneJob(b.dataset.id);
+  else if(a === 'jobcancel'){ if(confirmTwice('job' + b.dataset.id)) doneJob(b.dataset.id); }
   else if(a === 'prsend') sendPraise();
   else if(a === 'predit'){ S.prDraft = {to:S.praise.sent?.to || '', text:S.praise.sent?.text || '', edit:true}; render(); }
   else if(a === 'opsend') ownerPraise();
@@ -1792,6 +1884,7 @@ document.addEventListener('change', ev => {
     saveSettings(st);
   }
   else if(t.id === 'asS' || t.id === 'asE') $('#asBrk').textContent = brkLine(Number($('#asS').value), Number($('#asE').value));
+  else if(t.id === 'jobDate'){ if(/^\d{4}-\d{2}-\d{2}$/.test(t.value)) S.jobDay = t.value; t.blur(); render(); }
   else if(t.id === 'partA' || t.id === 'partB'){ S[t.id] = Number(t.value); LS.set('sb.' + t.id, S[t.id]); t.blur(); render(); }
 });
 document.addEventListener('input', ev => {
@@ -1800,6 +1893,7 @@ document.addEventListener('input', ev => {
   else if(t.id === 'buyText') S.buyDraft.text = t.value.slice(0, 40);
   else if(t.id === 'todoText') S.todoDraft.text = t.value.slice(0, 60);
   else if(t.id === 'todoDue') S.todoDraft.due = t.value;
+  else if(t.id === 'jobText') S.jobDraft.text = t.value.slice(0, 60);
   else if(t.id === 'todoBefore') S.todoDraft.before = Number(t.value) || 0;
   else if(t.id === 'prTo') S.prDraft.to = t.value;
   else if(t.id === 'opTo') S.opDraft.to = t.value;
@@ -1814,6 +1908,7 @@ document.addEventListener('keydown', ev => {
   if(ev.key === 'Escape' && !$('#sheetWrap').hidden) closeSheet();
   if(ev.key === 'Enter' && ev.target.id === 'buyText' && !ev.isComposing){ ev.preventDefault(); if(plusBuy()){ ev.target.blur(); render(); $('#buyText')?.focus(); } }
   if(ev.key === 'Enter' && ev.target.id === 'todoText' && !ev.isComposing){ ev.preventDefault(); ev.target.blur(); addTodo(); }
+  if(ev.key === 'Enter' && ev.target.id === 'jobText' && !ev.isComposing){ ev.preventDefault(); ev.target.blur(); addJob(); }
   if(ev.key === 'Enter' && ev.target.id === 'newStaff'){ ev.preventDefault(); document.querySelector('[data-act="addstaff"]').click(); }
 });
 
