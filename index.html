@@ -91,6 +91,8 @@ main{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:16px;
 .itemchips .chip .x{padding:7px 10px 7px 2px;color:var(--muted)} .itemchips .chip.on .x{color:inherit}
 .bpick{display:flex;gap:6px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)}
 .bpick b{flex:0 1 40%;min-width:0;overflow-wrap:anywhere;font-size:14px} .bpick input{flex:1;min-width:0}
+.jk{display:inline-block;font-size:12px;font-weight:700;line-height:1.5;padding:0 8px;border-radius:999px;margin-right:6px;color:#fff;vertical-align:2px;white-space:nowrap}
+.jkind .chip{padding:7px 16px;font-size:14px;font-weight:700} .jkind .chip.on{color:#fff}
 .buyrow .grow{min-width:0} .buyrow b{display:block;overflow-wrap:anywhere} .buyrow .muted{font-size:12px;overflow-wrap:anywhere}
 
 .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
@@ -320,7 +322,7 @@ const S = {
   clean:{}, cleanWk:'this', cleanEdit:null, cleanCk:null, photos:{},
   praise:{}, prDraft:{to:'', text:'', edit:false}, opDraft:{to:'', text:''}, prMonth:null,
   todo:{}, todoDraft:{text:'', due:'', before:0},
-  job:{}, jobDraft:{who:[], text:''}, jobDay:''
+  job:{}, jobDraft:{who:[], kind:'prep', picks:[], text:''}, jobDay:''
 };
 // 古い形式（早番・遅番）の設定にも、足りない項目は初期値を補う
 const settings = () => ({...DEFAULT_SETTINGS, ...(S.settings || {})});
@@ -1107,13 +1109,19 @@ async function doneTodo(id){
   catch(e){ S.todo[id] = t; render(); toast(saveErr(e)); }
 }
 
-/* ---------- 頼みごと（その日の仕込みの割り振り）：店長が日ごとに「だれに・なにを」を割り振る。
-   店の全員が見られ、頼まれた本人が「終わった」を押すと消える ---------- */
+/* ---------- 頼みごと（その日の仕事の割り振り）：店長が日ごとに「だれに・なにを」を割り振る。
+   店の全員が見られ、頼まれた本人が「終わった」を押すと消える。種類（仕込み・清掃・発注）で色分けする ---------- */
+const JOB_KINDS = [['prep', '仕込み', '#e07b24'], ['clean', '清掃', '#2f7fd1'], ['order', '発注', '#2e9a57'], ['', 'その他', '#7a7a7a']];
+const jobKind = k => JOB_KINDS.find(x => x[0] === (k || '')) || JOB_KINDS[3];
+const jobTag = k => { const [, name, color] = jobKind(k); return `<span class="jk" style="background:${color}">${name}</span>`; };
+// 前に頼んだこと：店長が割り振った内容を { text, kind } で覚えておき、次からタップで選べるようにする
+const jobHist = () => (S.items['job:' + S.store]?.items || []).filter(h => h && h.text);
 const dayStr = n => { const d = new Date(); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 // 見ている日（今日・明日など）。従業員は、日付が変わったら今日に戻す
 const jobDay = () => { if(!S.jobDay || (!S.isOwner && S.jobDay < dayStr(0))) S.jobDay = dayStr(0); return S.jobDay; };
+const kindOrder = k => JOB_KINDS.indexOf(jobKind(k));
 const jobsOn = day => Object.entries(S.job).filter(([, j]) => j && j.store === S.store && j.day === day)
-  .map(([id, j]) => ({id, ...j})).sort((a, b) => a.at - b.at);
+  .map(([id, j]) => ({id, ...j})).sort((a, b) => kindOrder(a.kind) - kindOrder(b.kind) || a.at - b.at);
 // タブの数字：今日、自分に割り振られている分
 const jobList = () => S.me ? jobsOn(dayStr(0)).filter(j => j.staffId === S.me) : [];
 const dayName = day => day === dayStr(0) ? '今日' : day === dayStr(1) ? '明日' : day === dayStr(-1) ? '昨日' : '';
@@ -1136,21 +1144,33 @@ function jobBoard(day){
       ${by[sid].map(j => { const ask = S.confirmDel === 'job' + j.id;
         const btn = S.isOwner ? `<button class="btn small ${ask ? 'danger' : ''}" data-act="jobcancel" data-id="${esc(j.id)}">${ask ? 'もう一度押すと取り消し' : '取り消す'}</button>`
           : mine ? `<button class="btn primary" data-act="jobdone" data-id="${esc(j.id)}">終わった</button>` : '';
-        return `<div class="li buyrow"><div class="grow">${mine ? `<b style="font-size:17px">${esc(j.text)}</b>` : esc(j.text)}</div>${btn}</div>`; }).join('')}
+        return `<div class="li buyrow"><div class="grow">${jobTag(j.kind)}${mine ? `<b style="font-size:17px">${esc(j.text)}</b>` : esc(j.text)}</div>${btn}</div>`; }).join('')}
     </div>`; }).join('');
 }
 function jobOwnerCards(){
   const d = S.jobDraft, staff = staffList(), day = jobDay(), n = jobsOn(day).length;
   d.who = d.who.filter(id => staff.some(s => s.id === id));
   const chips = staff.map(s => `<button class="chip ${d.who.includes(s.id) ? 'on' : ''}" data-act="jobwho" data-id="${esc(s.id)}" aria-pressed="${d.who.includes(s.id)}" style="padding:7px 14px;font-size:14px">${esc(s.name)}</button>`).join('');
+  const [, kname, kcolor] = jobKind(d.kind);
+  const kinds = JOB_KINDS.map(([k, name, color]) => { const on = (d.kind || '') === k;
+    return `<button class="chip ${on ? 'on' : ''}" data-act="jobkind" data-k="${k}" aria-pressed="${on}" style="${on ? `background:${color};border-color:${color}` : `border-color:${color};color:${color}`}">${name}</button>`; }).join('');
+  const has = t => d.picks.some(x => x.text === t);
+  const hist = jobHist().filter(h => (h.kind || '') === (d.kind || ''));
+  const pick = hist.length ? `<div class="field"><label>前に頼んだ${kname}（タップで選ぶ・いくつでも）</label><div class="chips itemchips">${hist.map(h => `<span class="chip ${has(h.text) ? 'on' : ''}" ${has(h.text) ? `style="background:${kcolor};border-color:${kcolor};color:#fff"` : ''}><button data-act="jobpick" data-t="${esc(h.text)}" aria-pressed="${has(h.text)}">${has(h.text) ? '✓ ' : ''}${esc(h.text)}</button><button class="x" data-act="jobhistdel" data-t="${esc(h.text)}" aria-label="${esc(h.text)}を前に頼んだことから消す">×</button></span>`).join('')}</div>
+    <p class="muted">× を押すと、ここから消えます（割り振った分は消えません）。</p></div>` : '';
+  const chosen = d.picks.length ? `<div class="field"><label>割り振ること（${d.picks.length}件）</label>
+    ${d.picks.map((x, i) => `<div class="bpick"><div style="flex:1;min-width:0">${jobTag(x.kind)}<b>${esc(x.text)}</b></div><button class="btn small" data-act="jobrm" data-i="${i}" aria-label="${esc(x.text)}を外す">×</button></div>`).join('')}</div>` : '';
   return `
   <section class="card">
-    <h2>仕込みの割り振り</h2>
-    <p class="muted">日にちと名前を選んで、やってほしいことを書きます。店の全員のアプリの「やること」に出て、終わったら本人が「終わった」を押すと消えます。</p>
+    <h2>仕事の割り振り</h2>
+    <p class="muted">日にち・名前・種類を選んで、やってほしいことを選ぶか書きます。店の全員のアプリの「やること」に出て、終わったら本人が「終わった」を押すと消えます。</p>
     ${jobDayBar()}
     ${staff.length ? `<div class="field"><label>だれに（何人でも選べます）</label><div class="chips">${chips}</div></div>
-    <div class="field"><label for="jobText">やってほしいこと</label><input id="jobText" maxlength="60" placeholder="例）茄子の仕込み" value="${esc(d.text)}"></div>
-    <button class="btn primary block" data-act="jobadd" ${S.sending ? 'disabled' : ''}>${S.sending ? '送信中…' : '割り振る'}</button>` : '<p class="muted">「設定」で従業員を登録すると割り振れるようになります。</p>'}
+    <div class="field"><label>種類</label><div class="chips jkind">${kinds}</div></div>
+    ${pick}
+    <div class="field"><label for="jobText">${hist.length ? '無いものは書いて「追加」' : 'やってほしいことを書いて「追加」'}</label><div class="row" style="flex-wrap:nowrap"><input id="jobText" maxlength="60" placeholder="${d.kind === 'clean' ? '例）トイレ掃除' : d.kind === 'order' ? '例）小麦粉の発注' : '例）茄子の仕込み'}" value="${esc(d.text)}" style="flex:1;min-width:0"><button class="btn" data-act="jobplus">追加</button></div></div>
+    ${chosen}
+    <button class="btn primary block" data-act="jobadd" ${S.sending ? 'disabled' : ''}>${S.sending ? '送信中…' : d.picks.length > 1 ? `まとめて割り振る（${d.picks.length}件）` : '割り振る'}</button>` : '<p class="muted">「設定」で従業員を登録すると割り振れるようになります。</p>'}
   </section>
   <section class="card">
     <div class="row between"><h2>${dayName(day) || ymd(day)}の割り振り（まだ終わっていない）</h2>${n ? `<span class="pill short num">${n}件</span>` : ''}</div>
@@ -1161,27 +1181,50 @@ function viewJob(){
   const staff = staffList(), day = jobDay();
   const pick = `<div class="field"><label for="meSel">あなたの名前</label><select id="meSel"><option value="">— 選んでください —</option>${staff.map(s => `<option value="${esc(s.id)}" ${s.id === S.me ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></div>`;
   return `<section class="card">
-    <h2>仕込みの割り振り</h2>
+    <h2>やること</h2>
     ${jobDayBar()}
     ${pick}
     <p class="muted">${S.me ? '自分の分が終わったら「終わった」を押してください。一覧から消えて、店長にも伝わります。' : '名前を選ぶと、自分の分に「終わった」ボタンが出ます。'}</p>
     <div class="list">${jobBoard(day)}</div>
   </section>`;
 }
+// 書きかけの内容を、割り振ることに足す（同じものは2つにしない）
+function plusJob(){
+  const d = S.jobDraft, t = d.text.trim();
+  if(!t) return false;
+  if(!d.picks.some(x => x.text === t)){
+    if(d.picks.length >= 10){ toast('一度に割り振れるのは10件までです'); return false; }
+    d.picks.push({text:t, kind:d.kind || ''});
+  }
+  d.text = ''; return true;
+}
 async function addJob(){
-  const d = S.jobDraft, text = d.text.trim(), day = jobDay();
+  const d = S.jobDraft, day = jobDay();
   if(S.sending) return;
-  if(!d.who.length){ toast('だれに頼むか、名前を選んでください'); return; }
-  if(!text){ toast('やってほしいことを書いてください'); $('#jobText')?.focus(); return; }
+  plusJob();
+  if(!d.who.length){ render(); toast('だれに頼むか、名前を選んでください'); return; }
+  const list = d.picks.map(x => ({text:x.text, kind:x.kind}));
+  if(!list.length){ render(); toast('やってほしいことを選ぶか、書いてください'); $('#jobText')?.focus(); return; }
   S.sending = true; render();
   try{
-    const r = await api('addJob', {staffIds:d.who, text, day});
+    const r = await api('addJob', {staffIds:d.who, list, day, store:S.store});
     (r.list || []).forEach(o => { S.job[o.id] = o.data; });
     toast(`${dayName(day) || ymd(day)}の分を${d.who.map(id => buyName(id) + 'さん').join('・')}に割り振りました`);
-    // 同じ人に続けて割り振れるよう、名前はそのまま残す
-    S.jobDraft = {who:d.who, text:''};
+    // 前に頼んだことに足す（新しいものほど前）
+    const key = 'job:' + S.store, add = list.map(x => x.text), cur = S.items[key]?.items || [];
+    S.items[key] = {items:[...list, ...cur.filter(h => h && !add.includes(h.text))].slice(0, 100)};
+    // 同じ人に続けて割り振れるよう、名前と種類はそのまま残す
+    S.jobDraft = {who:d.who, kind:d.kind, picks:[], text:''};
   }catch(e){ toast(e && e.code === 'bad_date' ? '日にちを確かめてください（昨日〜1か月先まで）' : saveErr(e)); }
   S.sending = false; render();
+}
+async function delJobHist(text){
+  const key = 'job:' + S.store, old = S.items[key]; if(!old) return;
+  S.items[key] = {items:old.items.filter(h => h && h.text !== text)};
+  S.jobDraft.picks = S.jobDraft.picks.filter(x => x.text !== text);
+  render();
+  try{ await api('delItem', {store:S.store, text, job:true}); }
+  catch(e){ S.items[key] = old; render(); toast(saveErr(e)); }
 }
 async function doneJob(id){
   const j = S.job[id]; if(!j) return;
@@ -1725,6 +1768,17 @@ document.addEventListener('click', async ev => {
   else if(a === 'tododone') doneTodo(b.dataset.id);
   else if(a === 'jobwho'){ const w = S.jobDraft.who, id = b.dataset.id; S.jobDraft.who = w.includes(id) ? w.filter(x => x !== id) : [...w, id]; render(); }
   else if(a === 'jobadd') addJob();
+  else if(a === 'jobkind'){ S.jobDraft.kind = b.dataset.k; render(); }
+  else if(a === 'jobpick'){
+    const t = b.dataset.t, d = S.jobDraft;
+    if(d.picks.some(x => x.text === t)) d.picks = d.picks.filter(x => x.text !== t);
+    else if(d.picks.length >= 10) toast('一度に割り振れるのは10件までです');
+    else d.picks.push({text:t, kind:d.kind || ''});
+    render();
+  }
+  else if(a === 'jobplus'){ if(plusJob()) render(); else $('#jobText')?.focus(); }
+  else if(a === 'jobrm'){ S.jobDraft.picks.splice(Number(b.dataset.i), 1); render(); }
+  else if(a === 'jobhistdel') delJobHist(b.dataset.t);
   else if(a === 'jobday'){ S.jobDay = b.dataset.d; render(); }
   else if(a === 'jobdone') doneJob(b.dataset.id);
   else if(a === 'jobcancel'){ if(confirmTwice('job' + b.dataset.id)) doneJob(b.dataset.id); }
@@ -1908,7 +1962,7 @@ document.addEventListener('keydown', ev => {
   if(ev.key === 'Escape' && !$('#sheetWrap').hidden) closeSheet();
   if(ev.key === 'Enter' && ev.target.id === 'buyText' && !ev.isComposing){ ev.preventDefault(); if(plusBuy()){ ev.target.blur(); render(); $('#buyText')?.focus(); } }
   if(ev.key === 'Enter' && ev.target.id === 'todoText' && !ev.isComposing){ ev.preventDefault(); ev.target.blur(); addTodo(); }
-  if(ev.key === 'Enter' && ev.target.id === 'jobText' && !ev.isComposing){ ev.preventDefault(); ev.target.blur(); addJob(); }
+  if(ev.key === 'Enter' && ev.target.id === 'jobText' && !ev.isComposing){ ev.preventDefault(); if(plusJob()){ ev.target.blur(); render(); $('#jobText')?.focus(); } }
   if(ev.key === 'Enter' && ev.target.id === 'newStaff'){ ev.preventDefault(); document.querySelector('[data-act="addstaff"]').click(); }
 });
 
