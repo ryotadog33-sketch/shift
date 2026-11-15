@@ -1110,9 +1110,9 @@ async function doneTodo(id){
 }
 
 /* ---------- 頼みごと（その日の仕事の割り振り）：店長が日ごとに「だれに・なにを」を割り振る。
-   店の全員が見られ、頼まれた本人が「終わった」を押すと消える。種類（仕込み・清掃・発注）で色分けする ---------- */
-const JOB_KINDS = [['prep', '仕込み', '#e07b24'], ['clean', '清掃', '#2f7fd1'], ['order', '発注', '#2e9a57'], ['', 'その他', '#7a7a7a']];
-const jobKind = k => JOB_KINDS.find(x => x[0] === (k || '')) || JOB_KINDS[3];
+   店の全員が見られ、頼まれた本人が「終わった」を押すと消える。種類（仕込み・清掃・発注・買い物）で色分けする ---------- */
+const JOB_KINDS = [['prep', '仕込み', '#e07b24'], ['clean', '清掃', '#2f7fd1'], ['order', '発注', '#2e9a57'], ['buy', '買い物', '#8e44ad'], ['', 'その他', '#7a7a7a']];
+const jobKind = k => JOB_KINDS.find(x => x[0] === (k || '')) || JOB_KINDS[JOB_KINDS.length - 1];
 const jobTag = k => { const [, name, color] = jobKind(k); return `<span class="jk" style="background:${color}">${name}</span>`; };
 // 前に頼んだこと：店長が割り振った内容を { text, kind } で覚えておき、次からタップで選べるようにする
 const jobHist = () => (S.items['job:' + S.store]?.items || []).filter(h => h && h.text);
@@ -1168,7 +1168,7 @@ function jobOwnerCards(){
     ${staff.length ? `<div class="field"><label>だれに（何人でも選べます）</label><div class="chips">${chips}</div></div>
     <div class="field"><label>種類</label><div class="chips jkind">${kinds}</div></div>
     ${pick}
-    <div class="field"><label for="jobText">${hist.length ? '無いものは書いて「追加」' : 'やってほしいことを書いて「追加」'}</label><div class="row" style="flex-wrap:nowrap"><input id="jobText" maxlength="60" placeholder="${d.kind === 'clean' ? '例）トイレ掃除' : d.kind === 'order' ? '例）小麦粉の発注' : '例）茄子の仕込み'}" value="${esc(d.text)}" style="flex:1;min-width:0"><button class="btn" data-act="jobplus">追加</button></div></div>
+    <div class="field"><label for="jobText">${hist.length ? '無いものは書いて「追加」' : 'やってほしいことを書いて「追加」'}</label><div class="row" style="flex-wrap:nowrap"><input id="jobText" maxlength="60" placeholder="${d.kind === 'clean' ? '例）トイレ掃除' : d.kind === 'order' ? '例）小麦粉の発注' : d.kind === 'buy' ? '例）牛乳を買ってくる' : '例）茄子の仕込み'}" value="${esc(d.text)}" style="flex:1;min-width:0"><button class="btn" data-act="jobplus">追加</button></div></div>
     ${chosen}
     <button class="btn primary block" data-act="jobadd" ${S.sending ? 'disabled' : ''}>${S.sending ? '送信中…' : d.picks.length > 1 ? `まとめて割り振る（${d.picks.length}件）` : '割り振る'}</button>` : '<p class="muted">「設定」で従業員を登録すると割り振れるようになります。</p>'}
   </section>
