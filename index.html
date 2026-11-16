@@ -968,22 +968,26 @@ function viewMy(){
   if(!isPubAny(sh, m)) return `<section class="card"><div class="empty"><h2>${monthInfo(m).mo}月のシフトはまだ公開されていません</h2><p>店長が公開するとここに表示されます。</p></div></section>`;
   const {n} = monthInfo(m);
   const mine = [];
-  let rows = '';
+  let rows = '', past = 0;
+  // 過ぎた日は出さない（今日から先だけ。今日のシフトを探しやすくするため）
+  const t0 = new Date(), today = `${t0.getFullYear()}-${String(t0.getMonth() + 1).padStart(2, '0')}-${String(t0.getDate()).padStart(2, '0')}`;
   for(let i = 1; i <= n; i++){
     const d = dk(i), es = dayEntries(sh, d).sort((a, b) => a[1].s - b[1].s);
+    if(`${m}-${String(i).padStart(2, '0')}` < today){ past++; continue; }
     const v = S.me && sh.days?.[d]?.[S.me];
     if(v && v.e > v.s) mine.push(`${i}日(${WD[dow(m, i)]}) ${fmtR(v.s, v.e)}${roleTxt(v) ? ' ' + roleTxt(v) : ''}`);
     if(!es.length) continue;
     const w = dow(m, i);
-    rows += `<div class="li"><b class="num" style="min-width:4.2em;align-self:flex-start;color:${w === 0 ? 'var(--sun)' : w === 6 ? 'var(--sat)' : 'inherit'}">${i}日(${WD[w]})</b><div class="grow">${es.map(([id, v]) => `<div class="num">${id === S.me ? `<span class="me-hl">${esc(S.staff[id].name)}</span>` : esc(S.staff[id].name)}${(S.staff[id].store || 'a') !== S.store ? `<span class="muted">（${esc(stName(S.staff[id].store || 'a'))}）</span>` : ''} <span class="muted">${fmtR(v.s, v.e)}${rolePair(v) ? ' ' + esc(rolePair(v)) : ''}</span></div>`).join('')}</div></div>`;
+    const isToday = `${m}-${String(i).padStart(2, '0')}` === today;
+    rows += `<div class="li"${isToday ? ' style="background:#eef3ff;border-radius:10px;padding-left:8px;padding-right:8px"' : ''}><b class="num" style="min-width:4.2em;align-self:flex-start;color:${w === 0 ? 'var(--sun)' : w === 6 ? 'var(--sat)' : 'inherit'}">${isToday ? '今日<br>' : ''}${i}日(${WD[w]})</b><div class="grow">${es.map(([id, v]) => `<div class="num">${id === S.me ? `<span class="me-hl">${esc(S.staff[id].name)}</span>` : esc(S.staff[id].name)}${(S.staff[id].store || 'a') !== S.store ? `<span class="muted">（${esc(stName(S.staff[id].store || 'a'))}）</span>` : ''} <span class="muted">${fmtR(v.s, v.e)}${rolePair(v) ? ' ' + esc(rolePair(v)) : ''}</span></div>`).join('')}</div></div>`;
   }
   const t = S.me ? staffTotals(sh, S.me) : null;
   return `
   <section class="card">
     <h2>あなたの勤務日</h2>
-    ${S.me ? (mine.length ? `<div class="chips">${mine.map(x => `<span class="chip on num">${esc(x)}</span>`).join('')}</div><p class="muted num">合計 ${t.days}日・${fmtH(t.hours)}</p>` : '<p class="muted">今月の割り当てはありません。</p>') : '<p class="muted">「希望提出」で名前を選ぶと、自分の勤務日が表示されます。</p>'}
+    ${S.me ? (mine.length ? `<div class="chips">${mine.map(x => `<span class="chip on num">${esc(x)}</span>`).join('')}</div><p class="muted num">今月の合計 ${t.days}日・${fmtH(t.hours)}</p>` : `<p class="muted">${past ? '今日から先の割り当てはありません。' : '今月の割り当てはありません。'}</p>`) : '<p class="muted">「希望提出」で名前を選ぶと、自分の勤務日が表示されます。</p>'}
   </section>
-  <section class="card"><h2>${monthInfo(m).mo}月のシフト</h2><p class="muted num">公開されている週：${pubWeeks(sh, m).map(wkRange).join('、')}<br>ほかの週は、店長が公開するとここに出ます。</p><div class="list">${rows || '<p class="muted">まだ割り当てがありません。</p>'}</div></section>`;
+  <section class="card"><h2>${monthInfo(m).mo}月のシフト</h2><p class="muted num">公開されている週：${pubWeeks(sh, m).map(wkRange).join('、')}<br>ほかの週は、店長が公開するとここに出ます。${past ? '<br>過ぎた日は表示していません。' : ''}</p><div class="list">${rows || `<p class="muted">${past ? '今日から先のシフトはありません。' : 'まだ割り当てがありません。'}</p>`}</div></section>`;
 }
 
 /* ---------- 買い物のお願い：従業員が頼み、店長が買ったら消す ---------- */
