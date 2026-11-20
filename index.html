@@ -1123,13 +1123,14 @@ const jobTag = k => { const [, name, color] = jobKind(k); return `<span class="j
 const jobHist = () => (S.items['job:' + S.store]?.items || []).filter(h => h && h.text);
 const dayStr = n => { const d = new Date(); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 // 見ている日（今日・明日など）。従業員は、日付が変わったら今日に戻す
-const jobDay = () => { if(!S.jobDay || (!S.isOwner && S.jobDay < dayStr(0))) S.jobDay = dayStr(0); return S.jobDay; };
+const jobDay = () => { if(!S.jobDay || S.jobDayBase !== dayStr(0)){ S.jobDay = dayStr(0); S.jobDayBase = dayStr(0); } return S.jobDay; };
 const kindOrder = k => JOB_KINDS.indexOf(jobKind(k));
 // 自分（店長は 'owner'）
 const jobMe = () => S.isOwner ? 'owner' : S.me;
 const jobWhoName = id => id === 'owner' ? '店長' : buyName(id) + 'さん';
-// 店長あての分は、終わるまで今日以降の一覧に残す
-const jobsOn = day => Object.entries(S.job).filter(([, j]) => j && j.store === S.store && (j.day === day || (j.staffId === 'owner' && j.day < day && day >= dayStr(0))))
+// 店長あての分と買い物は、終わる（買う）まで今日以降の一覧に残す
+const jobKeep = j => j.staffId === 'owner' || j.kind === 'buy';
+const jobsOn = day => Object.entries(S.job).filter(([, j]) => j && j.store === S.store && (j.day === day || (jobKeep(j) && j.day < day && day >= dayStr(0))))
   .map(([id, j]) => ({id, ...j})).sort((a, b) => kindOrder(a.kind) - kindOrder(b.kind) || a.at - b.at);
 // タブの数字：今日、自分に割り振られている分
 const jobList = () => jobMe() ? jobsOn(dayStr(0)).filter(j => j.staffId === jobMe()) : [];
@@ -1176,10 +1177,10 @@ function jobForm(){
   <section class="card">
     <h2>${S.isOwner ? '仕事の割り振り' : '割り振る・店長に頼む'}</h2>
     <p class="muted">${S.isOwner ? '日にち・名前・種類を選んで、やってほしいことを選ぶか書きます。店の全員のアプリの「やること」に出て、終わったら本人が「終わった」を押すと消えます。'
-      : `${dayName(day) || ymd(day)}の分です。店長に買ってきてほしい物は「店長」と「買い物」を選んでください。`}</p>
+      : `${dayName(day) || ymd(day)}の分です。店長に買ってきてほしい物は、種類で「買い物」を選んでください。`}</p>
     ${S.isOwner ? jobDayBar() : ''}
-    <div class="field"><label>だれに（何人でも選べます）</label><div class="chips">${chips}</div></div>
     <div class="field"><label>種類</label><div class="chips jkind">${kinds}</div></div>
+    ${d.kind === 'buy' ? '<p class="muted">買い物は店長あてになります（名前は選ばなくてOK）。買ってくるまで毎日残ります。</p>' : `<div class="field"><label>だれに（何人でも選べます）</label><div class="chips">${chips}</div></div>`}
     ${pick}
     <div class="field"><label for="jobText">${hist.length ? '無いものは書いて「追加」' : 'やってほしいことを書いて「追加」'}</label><div class="row" style="flex-wrap:nowrap"><input id="jobText" maxlength="60" placeholder="${d.kind === 'clean' ? '例）トイレ掃除' : d.kind === 'order' ? '例）小麦粉の発注' : d.kind === 'buy' ? '例）牛乳 2本' : '例）茄子の仕込み'}" value="${esc(d.text)}" style="flex:1;min-width:0"><button class="btn" data-act="jobplus">追加</button></div></div>
     ${chosen}
@@ -1221,14 +1222,23 @@ async function addJob(){
   if(S.sending) return;
   if(!S.isOwner && !S.me){ toast('先に、あなたの名前を選んでください'); return; }
   plusJob();
-  if(!d.who.length){ render(); toast('だれに頼むか、名前を選んでください'); return; }
   const list = d.picks.map(x => ({text:x.text, kind:x.kind}));
   if(!list.length){ render(); toast('やってほしいことを選ぶか、書いてください'); $('#jobText')?.focus(); return; }
+  // 買い物は名前を選ばなくても店長あて。それ以外は選んだ人あて
+  const buys = list.filter(x => x.kind === 'buy'), others = list.filter(x => x.kind !== 'buy');
+  if(others.length && !d.who.length){ render(); toast('だれに頼むか、名前を選んでください'); return; }
   S.sending = true; render();
   try{
-    const r = await api('addJob', {staffIds:d.who, list, day, store:S.store, by:S.isOwner ? '' : S.me});
-    (r.list || []).forEach(o => { S.job[o.id] = o.data; });
-    toast(`${dayName(day) || ymd(day)}の分を${d.who.map(jobWhoName).join('・')}に割り振りました`);
+    const by = S.isOwner ? '' : S.me, sent = [];
+    if(buys.length){
+      const r = await api('addJob', {staffIds:['owner'], list:buys, day, store:S.store, by});
+      (r.list || []).forEach(o => { S.job[o.id] = o.data; }); sent.push('店長に買い物');
+    }
+    if(others.length){
+      const r = await api('addJob', {staffIds:d.who, list:others, day, store:S.store, by});
+      (r.list || []).forEach(o => { S.job[o.id] = o.data; }); sent.push(d.who.map(jobWhoName).join('・'));
+    }
+    toast(buys.length && !others.length ? `店長に買い物${buys.length}件を頼みました` : `${dayName(day) || ymd(day)}の分を${sent.join('・')}に割り振りました`);
     // 前に頼んだことに足す（新しいものほど前）
     const key = 'job:' + S.store, add = list.map(x => x.text), cur = S.items[key]?.items || [];
     S.items[key] = {items:[...list, ...cur.filter(h => h && !add.includes(h.text))].slice(0, 100)};
